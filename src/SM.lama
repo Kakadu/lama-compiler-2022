@@ -24,10 +24,38 @@ public fun showSM (prg) {
   map (fun (i) {showSMInsn (i) ++ "\n"}, prg).stringcat
 }
 
+fun evalInstruction (c, ins) {
+  var stack = c[0], st = c[1], w = c[2];
+
+  case ins of
+    READ      -> (
+      var readedWorld = w.readWorld;
+      var value = readedWorld.fst, newWorld = readedWorld.snd;
+      [value : stack, st, newWorld]
+    )
+  | WRITE     -> (
+      var value = stack.hd, stackTail = stack.tl;
+      [stackTail, st, writeWorld(value, w)]
+    )
+  | BINOP (binop) -> (
+      var rarg = stack.hd, ytail = stack.tl;
+      var larg = ytail.hd, stackTail = ytail.tl;
+      var value = evalBinop (binop) (larg, rarg);
+      [value : stackTail, st, w]
+    ) 
+  | LD    (x) -> [st (x) : stack, st, w]
+  | ST    (x) -> (
+      var value = stack.hd, stackTail = stack.tl;
+      [stackTail, st <- [x, value], w]
+    )
+  | CONST (n) -> [n : stack, st, w]
+  esac
+}
+
 -- Stack machine interpreter. Takes an SM-configuration and a program,
 -- returns a final configuration
 fun eval (c, insns) {
-  failure ("SM eval not implemented\n")
+  foldl(evalInstruction, c, insns)
 }
 
 -- Runs a stack machine for a given input and a given program, returns an output
@@ -38,12 +66,21 @@ public fun evalSM (input, insns) {
 -- Compiles an expression into a stack machine code.
 -- Takes an expression, returns a list of stack machine instructions
 fun compileExpr (expr) {
-  failure ("compileExpr not implemented\n")
+  case expr of 
+    Const (n)                   -> { CONST (n) }
+  | Var (name)                  -> { LD (name) }
+  | Binop (binop, lexpr, rexpr) -> compileExpr (lexpr) +++ compileExpr (rexpr) +++ { BINOP (binop) }
+  esac
 }
 
 -- Compiles a statement into a stack machine code.
 -- Takes a statement, returns a list of stack machine
 -- instructions.
 public fun compileSM (stmt) {
-  failure ("compileSM not implemented\n")
+  case stmt of
+    Assn (x, expr) -> compileExpr (expr) +++ { ST (x) }
+  | Seq (stmt1, stmt2) -> compileSM(stmt1) +++ compileSM(stmt2)
+  | Read (x) -> { READ, ST (x) }
+  | Write (expr) -> compileExpr(expr) +++ { WRITE }
+  esac
 }
