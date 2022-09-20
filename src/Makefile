@@ -8,11 +8,11 @@ LAMAC=lamac
 
 all: $(ALL)
 
-Expr.o: State.o
+Expr.o: State.o Binop.o
 
 Stmt.o: State.o Expr.o World.o
 
-SM.o: State.o World.o 
+SM.o: State.o World.o
 
 X86.o: SM.o
 

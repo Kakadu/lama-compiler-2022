@@ -1,5 +1,6 @@
 -- Expression evaluator
 
+import Binop;
 import List;
 import State;
 
@@ -13,6 +14,10 @@ import State;
 --        Const (int)                |
 --        Binop (string, expr, expr)
 
-public fun evalExpr (st, expr) {
-  failure ("evalExpr not implemented\n")
+public fun evalExpr(s, expr) {
+  case expr of
+    Var(x)                    -> s(x)
+    | Const(n)                -> n
+    | Binop(op, expr1, expr2) -> evalBinop(op)(evalExpr(s, expr1), evalExpr(s, expr2))
+  esac
 }

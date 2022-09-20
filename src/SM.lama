@@ -1,5 +1,6 @@
 -- Stack machine.
 
+import Binop;
 import List;
 import World;
 import State;
@@ -11,12 +12,12 @@ import Fun;
 -- string representation.
 public fun showSMInsn (i) {
   case i of
-    READ      -> sprintf ("READ")
-  | WRITE     -> sprintf ("WRITE")
-  | BINOP (s) -> sprintf ("BINOP %s", s)
-  | LD    (x) -> sprintf ("LD %s", x)
-  | ST    (x) -> sprintf ("ST %s", x)
-  | CONST (n) -> sprintf ("CONST %d", n)
+    READ        -> sprintf("READ")
+    | WRITE     -> sprintf("WRITE")
+    | BINOP (s) -> sprintf("BINOP %s", s)
+    | LD    (x) -> sprintf("LD %s", x)
+    | ST    (x) -> sprintf("ST %s", x)
+    | CONST (n) -> sprintf("CONST %d", n)
   esac
 }
 
@@ -27,7 +28,28 @@ public fun showSM (prg) {
 -- Stack machine interpreter. Takes an SM-configuration and a program,
 -- returns a final configuration
 fun eval (c, insns) {
-  failure ("SM eval not implemented\n")
+  foldl(fun ([stack, s, w], insn) {
+    case insn of
+      READ         ->
+        case readWorld(w) of
+          [z, w] -> [z:stack, s, w]
+        esac
+      | WRITE      ->
+        case stack of
+          z : stack -> [stack, s, writeWorld(z, w)]
+        esac
+      | BINOP (op) ->
+        case stack of
+          y : x : stack -> [evalBinop(op)(x, y):stack, s, w]
+        esac
+      | LD    (x)  -> [s(x):stack, s, w]
+      | ST    (x)  ->
+        case stack of
+          z : stack -> [stack, s <- [x, z], w]
+        esac
+      | CONST (n)  -> [n:stack, s, w]
+    esac
+  }, c, insns)
 }
 
 -- Runs a stack machine for a given input and a given program, returns an output
@@ -36,14 +58,37 @@ public fun evalSM (input, insns) {
 }
 
 -- Compiles an expression into a stack machine code.
+-- Takes an expression, returns a Buffer of stack machine instructions
+fun compileExprToBuffer(expr) {
+  case expr of
+    Var(x)                    -> singletonBuffer(LD(x))
+    | Const(n)                -> singletonBuffer(CONST(n))
+    | Binop(op, expr1, expr2) -> compileExprToBuffer(expr1) <+> compileExprToBuffer(expr2) <+ BINOP(op)
+  esac
+}
+
+-- Compiles an expression into a stack machine code.
 -- Takes an expression, returns a list of stack machine instructions
 fun compileExpr (expr) {
-  failure ("compileExpr not implemented\n")
+  getBuffer(compileExprToBuffer(expr))
+}
+
+-- Compiles a statement into a stack machine code.
+-- Takes a statement, returns a Buffer of stack machine
+-- instructions.
+public fun compileSMToBuffer(stmt) {
+  case stmt of
+    Assn(x, expr)       -> compileExprToBuffer(expr) <+ ST(x)
+    | Seq(stmt1, stmt2) -> compileSMToBuffer(stmt1) <+> compileSMToBuffer(stmt2)
+    | Skip              -> emptyBuffer()
+    | Read(x)           -> listBuffer({ READ, ST(x) })
+    | Write(expr)       -> compileExprToBuffer(expr) <+ WRITE
+  esac
 }
 
 -- Compiles a statement into a stack machine code.
 -- Takes a statement, returns a list of stack machine
 -- instructions.
 public fun compileSM (stmt) {
-  failure ("compileSM not implemented\n")
+  getBuffer(compileSMToBuffer(stmt))
 }
