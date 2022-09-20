@@ -9,41 +9,62 @@ import Fun;
 
 -- Stack code printer. Takes a list of SM instructions, return its
 -- string representation.
-public fun showSMInsn (i) {
+public fun showSMInsn(i) {
   case i of
-    READ      -> sprintf ("READ")
-  | WRITE     -> sprintf ("WRITE")
-  | BINOP (s) -> sprintf ("BINOP %s", s)
-  | LD    (x) -> sprintf ("LD %s", x)
-  | ST    (x) -> sprintf ("ST %s", x)
-  | CONST (n) -> sprintf ("CONST %d", n)
+    READ        -> sprintf("READ")
+    | WRITE     -> sprintf("WRITE")
+    | BINOP (s) -> sprintf("BINOP %s", s)
+    | LD    (x) -> sprintf("LD %s", x)
+    | ST    (x) -> sprintf("ST %s", x)
+    | CONST (n) -> sprintf("CONST %d", n)
   esac
 }
 
-public fun showSM (prg) {
-  map (fun (i) {showSMInsn (i) ++ "\n"}, prg).stringcat
+public fun showSM(prg) {
+  map(fun (i) { showSMInsn(i) ++ "\n" }, prg).stringcat
 }
 
 -- Stack machine interpreter. Takes an SM-configuration and a program,
 -- returns a final configuration
-fun eval (c, insns) {
-  failure ("SM eval not implemented\n")
+fun eval(c @ [stack, conf @ [state, world]], insns) {
+  case insns of
+    { }             -> c
+    | CONST (n) : p -> eval([n:stack, conf], p)
+    | BINOP (s) : p -> case stack of y : x : tl -> eval([binop(s)(x, y):tl, conf], p) esac
+    | READ : p      -> case readWorld(world) of [v, newWorld] -> eval([stack, [state, newWorld]], p) esac
+    | WRITE : p     -> case stack of n : tl -> eval([tl, [state, writeWorld(n, world)]], p) esac
+    | LD (x) : p    -> eval([state(x):stack, conf], p)
+    | ST (x) : p    -> case stack of n : tl -> eval([tl, [state <- [x, n], world]], p) esac
+  esac
 }
 
 -- Runs a stack machine for a given input and a given program, returns an output
-public fun evalSM (input, insns) {
-  eval ([{}, emptyState, createWorld (input)], insns)[2].getOutput
+public fun evalSM(input, insns) {
+  eval([{ }, emptyState, createWorld(input)], insns)[2].getOutput
 }
 
 -- Compiles an expression into a stack machine code.
 -- Takes an expression, returns a list of stack machine instructions
-fun compileExpr (expr) {
-  failure ("compileExpr not implemented\n")
+fun compileExpr(expr) {
+  case expr of
+    Const (n)         -> singletonBuffer(CONST(n))
+    | Var (x)         -> singletonBuffer(LD(x))
+    | Binop (s, x, y) -> compileExpr(x) <+> compileExpr(y) <+ BINOP(s)
+  esac
 }
 
 -- Compiles a statement into a stack machine code.
 -- Takes a statement, returns a list of stack machine
 -- instructions.
-public fun compileSM (stmt) {
-  failure ("compileSM not implemented\n")
+public fun compileSM(stmt) {
+  fun compile(stmt) {
+    case stmt of
+      Skip                 -> emptyBuffer()
+      | Assn (x, expr)     -> compileExpr(expr) <+ ST(x)
+      | Read (x)           -> singletonBuffer(READ) <+ ST(x)
+      | Write (expr)       -> compileExpr(expr) <+ WRITE
+      | Seq (stmt1, stmt2) -> compile(stmt1) <+> compile(stmt2)
+    esac
+  }
+  getBuffer(compile(stmt))
 }
