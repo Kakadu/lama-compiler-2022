@@ -26,15 +26,15 @@ public fun showSM(prg) {
 
 -- Stack machine interpreter. Takes an SM-configuration and a program,
 -- returns a final configuration
-fun eval(c @ [stack, conf @ [state, world]], insns) {
+fun eval(c @ [stack, state, world], insns) {
   case insns of
     { }             -> c
-    | CONST (n) : p -> eval([n:stack, conf], p)
-    | BINOP (s) : p -> case stack of y : x : tl -> eval([binop(s)(x, y):tl, conf], p) esac
-    | READ : p      -> case readWorld(world) of [v, newWorld] -> eval([stack, [state, newWorld]], p) esac
-    | WRITE : p     -> case stack of n : tl -> eval([tl, [state, writeWorld(n, world)]], p) esac
-    | LD (x) : p    -> eval([state(x):stack, conf], p)
-    | ST (x) : p    -> case stack of n : tl -> eval([tl, [state <- [x, n], world]], p) esac
+    | CONST (n) : p -> eval([n:stack, state, world], p)
+    | BINOP (s) : p -> case stack of y : x : tl -> eval([binop(s)(x, y):tl, state, world], p) esac
+    | READ : p      -> case readWorld(world) of [v, newWorld] -> eval([v:stack, state, newWorld], p) esac
+    | WRITE : p     -> case stack of n : tl -> eval([tl, state, writeWorld(n, world)], p) esac
+    | LD (x) : p    -> eval([state(x):stack, state, world], p)
+    | ST (x) : p    -> case stack of n : tl -> eval([tl, state <- [x, n], world], p) esac
   esac
 }
 
