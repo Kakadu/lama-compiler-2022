@@ -27,13 +27,7 @@ public fun showSM (prg) {
 -- Stack machine interpreter. Takes an SM-configuration and a program,
 -- returns a final configuration
 fun eval (c, insns) {
-  (
-    var curConf = c;
-    for var i; i := 0, i < insns.length, i := i + 1 do
-      curConf := evalSingleInstruction(curConf, insns[i]) 
-    od;
-    curConf
-  )
+  foldl(evalSingleInstruction, c, insns)
 }
 
 fun evalSingleInstruction([stack, state, world], insn) {
@@ -60,7 +54,7 @@ fun evalSingleInstruction([stack, state, world], insn) {
 
 -- Runs a stack machine for a given input and a given program, returns an output
 public fun evalSM (input, insns) {
-  eval ([{}, emptyState, createWorld (input)], insns)[2].getOutput
+  eval ([{}, emptyState, createWorld (input)], getBuffer(insns))[2].getOutput
 }
 
 -- Compiles an expression into a stack machine code.
