@@ -4,8 +4,6 @@ import State;
 import Expr;
 import World;
 
-public infix :=: after <- (x, v) { [x, v] }
-
 -- Evaluates a statement "stmt" in a configuration "c".
 -- A configuration is a pair of a state "s" and a world "w".
 -- Returns a final configuration (if any)
@@ -18,17 +16,17 @@ public infix :=: after <- (x, v) { [x, v] }
 --        Read   (string)           |
 --        Write  (expr)             |
 
-fun eval (c@[s, w], stmt) {
+fun eval(c@[s, w], stmt) {
   case stmt of
-    Assn (name, expr) -> [s <- name :=: evalExpr(s, expr), w]
-    | Seq (s1, s2)      -> eval(eval(c, s1), s2)
-    | Skip              -> c
-    | Read (name)       -> case readWorld(w) of [n, w] -> [s <- [name, n], w] esac
-    | Write (expr)      -> [s, writeWorld(evalExpr(s, expr), w)]
+    Assn (name, expr) -> [s <- [name, evalExpr(s, expr)], w]
+    | Seq (s1, s2)    -> eval(eval(c, s1), s2)
+    | Skip            -> c
+    | Read (name)     -> case readWorld(w) of [n, w] -> [s <- [name, n], w] esac
+    | Write (expr)    -> [s, writeWorld(evalExpr(s, expr), w)]
   esac
 }
 
 -- Evaluates a program with a given input and returns an output
-public fun evalStmt (input, stmt) {
-  eval ([emptyState, createWorld (input)], stmt).snd.getOutput
+public fun evalStmt(input, stmt) {
+  eval([emptyState, createWorld(input)], stmt).snd.getOutput
 }

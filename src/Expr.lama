@@ -15,7 +15,7 @@ import State;
 
 public fun evalOp(op, l, r) {
   case op of
-    "+"  -> l + r
+    "+"    -> l + r
     | "-"  -> l - r
     | "*"  -> l * r
     | "/"  -> l / r
@@ -31,10 +31,10 @@ public fun evalOp(op, l, r) {
   esac
 }
 
-public fun evalExpr (st, expr) {
+public fun evalExpr(st, expr) {
   case expr of
-    Var (name) -> st(name)
-    | Const (n)  -> n
+    Var (name)         -> st(name)
+    | Const (n)        -> n
     | Binop (op, l, r) -> evalOp(op, evalExpr(st, l), evalExpr(st, r))
   esac
 }
