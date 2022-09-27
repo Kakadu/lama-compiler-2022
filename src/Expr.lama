@@ -1,6 +1,5 @@
 -- Expression evaluator
 
-import Fun;
 import List;
 import State;
 
