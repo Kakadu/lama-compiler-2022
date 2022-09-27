@@ -82,10 +82,10 @@ public fun compileSM(stmt) {
 -- instructions.
 fun compileSMBuf(stmt) {
   case stmt of
-    Assn(x, expr)       -> compileSMBuf(expr) <+ ST(x)
+    Assn(x, e)          -> compileExprBuf(e) <+ ST(x)
     | Seq(stmt1, stmt2) -> compileSMBuf(stmt1) <+> compileSMBuf(stmt2)
     | Skip              -> emptyBuffer()
     | Read(x)           -> emptyBuffer() <+ READ <+ ST(x)
-    | Write(expr)       -> compileExprBuf(expr) <+ WRITE
+    | Write(e)          -> compileExprBuf(e) <+ WRITE
   esac
 }
