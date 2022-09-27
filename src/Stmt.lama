@@ -20,7 +20,7 @@ import World;
 fun eval(c @ [state, world], stmt) {
   case stmt of
     Assn (x, e)         -> [state <- [x, evalExpr(state, e)], world]
-    | Seq(stmt1, stmt2) -> eval(eval(c, stmt1), stmt2)
+    | Seq(stmt1, stmt2) -> foldl(eval, c, { stmt1, stmt2 })
     | Skip              -> c
     | Read(x)           ->
       case readWorld(world) of
