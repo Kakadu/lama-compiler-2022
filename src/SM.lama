@@ -9,41 +9,79 @@ import Fun;
 
 -- Stack code printer. Takes a list of SM instructions, return its
 -- string representation.
-public fun showSMInsn (i) {
+public fun showSMInsn(i) {
   case i of
-    READ      -> sprintf ("READ")
-  | WRITE     -> sprintf ("WRITE")
-  | BINOP (s) -> sprintf ("BINOP %s", s)
-  | LD    (x) -> sprintf ("LD %s", x)
-  | ST    (x) -> sprintf ("ST %s", x)
-  | CONST (n) -> sprintf ("CONST %d", n)
+    READ      -> sprintf("READ")
+  | WRITE     -> sprintf("WRITE")
+  | BINOP (s) -> sprintf("BINOP %s", s)
+  | LD    (x) -> sprintf("LD %s", x)
+  | ST    (x) -> sprintf("ST %s", x)
+  | CONST (n) -> sprintf("CONST %d", n)
   esac
 }
 
-public fun showSM (prg) {
-  map (fun (i) {showSMInsn (i) ++ "\n"}, prg).stringcat
+public fun showSM(prg) {
+  map(fun (i) {showSMInsn(i) ++ "\n"}, prg).stringcat
 }
 
 -- Stack machine interpreter. Takes an SM-configuration and a program,
 -- returns a final configuration
-fun eval (c, insns) {
-  failure ("SM eval not implemented\n")
+fun eval(c, insns) {
+  fun evalInstruction(c, insn) {
+    var stack = c[0];
+    var state = c[1];
+    var w = c[2];
+
+    case insn of
+      READ         -> (
+        case w.readWorld of [value, newW] -> [value : stack, state, newW] esac
+      )
+    | WRITE        -> (
+      [stack.tl, state, writeWorld(stack.hd, w)]
+    )
+    | BINOP(binop) -> (
+      var rArg = stack.hd;
+      var temp = stack.tl;
+      var lArg = temp.hd;
+      var stackTail = temp.tl;
+      var value = evalBinop(binop)(lArg, rArg);
+      [value : stackTail, state, w]
+    )
+    | LD (x)       -> [state(x) : stack, state, w]
+    | ST (x)       -> [stack.tl, state <- [x, stack.hd], w]
+    | CONST (n)    -> [n : stack, state, w]
+    esac
+  }
+  foldl(evalInstruction, c, insns)
 }
 
 -- Runs a stack machine for a given input and a given program, returns an output
-public fun evalSM (input, insns) {
-  eval ([{}, emptyState, createWorld (input)], insns)[2].getOutput
+public fun evalSM(input, insns) {
+  eval([{}, emptyState, createWorld(input)], insns)[2].getOutput
 }
 
 -- Compiles an expression into a stack machine code.
 -- Takes an expression, returns a list of stack machine instructions
-fun compileExpr (expr) {
-  failure ("compileExpr not implemented\n")
+fun compileExpr(expr) {
+  case expr of
+    Const (n)                 -> singletonBuffer(CONST(n))
+  | Var (x)                   -> singletonBuffer(LD(x))
+  | Binop (binop, lexp, rexp) -> compileExpr(lexp) <+> compileExpr(rexp) <+ BINOP(binop)
+  esac
 }
 
 -- Compiles a statement into a stack machine code.
 -- Takes a statement, returns a list of stack machine
 -- instructions.
-public fun compileSM (stmt) {
-  failure ("compileSM not implemented\n")
+public fun compileSM(stmt) {
+  fun compile(stmt) {
+    case stmt of
+      Read (x)      -> singletonBuffer(READ) <+ ST(x)
+    | Write (exp)   -> compileExpr(exp) <+ WRITE
+    | Assn (x, exp) -> compileExpr(exp) <+ ST(x)
+    | Seq (s1, s2)  -> compile(s1) <+> compile(s2)
+    | Skip          -> emptyBuffer()
+    esac
+  }
+  getBuffer $ compile(stmt)
 }
