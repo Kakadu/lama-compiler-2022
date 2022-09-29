@@ -28,6 +28,7 @@ public fun evalBinOp (op, expr1, expr2) {
     | "!=" -> expr1 != expr2
     | "&&" -> expr1 && expr2
     | "!!" -> expr1 !! expr2
+    | _    -> failure ("Undefined operation\n")
   esac
 }
 
