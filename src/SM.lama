@@ -24,25 +24,25 @@ public fun showSM (prg) {
   map (fun (i) {showSMInsn (i) ++ "\n"}, prg).stringcat
 }
 
-fun help_eval([stack, state, world], insn) {
+fun help_eval ([stack, state, world], insn) {
     case insn of
       ST    (v)  -> (
       case stack of hd : tl -> [tl, state <- [v, hd], world] esac
     )
-    | LD    (v)  -> [state(v):stack, state, world]
+    | LD    (v)  -> [state (v) : stack, state, world]
     | BINOP (op) -> (
       case stack of 
-      hd1 : hd2 : tl -> [evalBinOp (op, hd2, hd1):tl, state, world]
+      hd1 : hd2 : tl -> [evalBinOp (op, hd2, hd1) : tl, state, world]
       esac
     )
-    | CONST (v)  -> [v:stack, state, world]
+    | CONST (v)  -> [v : stack, state, world]
     | READ       -> (
-      case readWorld(world) of
-      [v, world1] -> [v:stack, state, world1]
+      case readWorld (world) of
+      [v, world1] -> [v : stack, state, world1]
       esac)
     | WRITE      -> (
       case stack of
-      hd : tl -> [tl, state, writeWorld(hd, world)]
+      hd : tl -> [tl, state, writeWorld (hd, world)]
       esac
     )
     esac
@@ -52,8 +52,8 @@ fun help_eval([stack, state, world], insn) {
 -- returns a final configuration
 fun eval (c, insns) {
   case insns of
-  { }       -> c
-  | hd : tl -> eval(help_eval(c, hd), tl)
+    { }     -> c
+  | hd : tl -> eval (help_eval (c, hd), tl)
   esac
 }
 
@@ -66,9 +66,9 @@ public fun evalSM (input, insns) {
 -- Takes an expression, returns a list of stack machine instructions
 fun compileExpr (expr) {
   case expr of
-  Var   (v)            -> { LD (v) }
+    Var   (v)          -> { LD (v) }
   | Const (c)          -> { CONST (c) }
-  | Binop (op, e1, e2) -> compileExpr (e1) +++ compileExpr(e2) +++ { BINOP (op) }
+  | Binop (op, e1, e2) -> compileExpr (e1) +++ compileExpr (e2) +++ { BINOP (op) }
   esac
 }
 
@@ -77,10 +77,10 @@ fun compileExpr (expr) {
 -- instructions.
 public fun compileSM (stmt) {
   case stmt of
-  Assn (v, e) -> compileExpr(e) +++ { ST(v) }
-  | Seq (stmt1, stmt2) -> compileSM (stmt1) +++ compileSM (stmt2)
-  | Skip -> []
-  | Write (e) -> compileExpr (e) +++ { WRITE }
-  | Read (v) -> { READ, ST (v)}
+    Assn  (v, e)         -> compileExpr (e) +++ { ST (v) }
+  | Seq   (stmt1, stmt2) -> compileSM (stmt1) +++ compileSM (stmt2)
+  | Skip                 -> []
+  | Write (e)            -> compileExpr (e) +++ { WRITE }
+  | Read  (v)            -> { READ, ST (v)}
   esac
 }
