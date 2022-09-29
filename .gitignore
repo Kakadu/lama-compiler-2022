@@ -1,0 +1,5 @@
+lectures/
+regression/
+*.o
+*.s
+*.i
