@@ -24,7 +24,7 @@ fun eval (c @ [st, w], stmt) {
   | Read  (x)         -> (
     case readWorld (w) of [z, w1] -> [st <- [x, z], w1] esac
   )
-  | Write (e)         -> [st, readWorld (evalExpr (st, e), w)]
+  | Write (e)         -> [st, writeWorld (evalExpr (st, e), w)]
   | _                 -> failure ("Undefined statement\n")
   esac
 }
