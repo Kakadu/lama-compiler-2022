@@ -31,7 +31,7 @@ fun eval (c, instr) {
     case instr of
       READ        -> case readWorld(world) of [value, world] -> [value:stack, state, world] esac
       | WRITE     -> case stack of hd : tl -> [tl, state, writeWorld(hd, world)] esac
-      | BINOP (x) -> case stack of hd1 : hd2 : tl -> [evalBinOp(x, hd2, hd1):tl, state, world] esac
+      | BINOP (x) -> case stack of hd1 : hd2 : tl -> [evalBinop(x, hd2, hd1):tl, state, world] esac
       | LD (x)    -> [state(x):stack, state, world]
       | ST (x)    -> case stack of hd : tl -> [tl, state <- [x, hd], world] esac
       | CONST (x) -> [x:stack, state, world]
