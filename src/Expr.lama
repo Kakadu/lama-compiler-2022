@@ -67,6 +67,30 @@ fun eval (c@[s, w], expr) {
   failure ("evalExpr not implemented\n")
 }
 
+-- public fun evalExpr (st, expr) {
+--   case expr of
+--       Var (s) -> st(s)
+--     | Const (i) -> i
+--     | Binop (s, exp1, exp2) -> (
+--       case s of 
+--           "*"  -> evalExpr(st, exp1) *  evalExpr(st, exp2)
+--         | "+"  -> evalExpr(st, exp1) +  evalExpr(st, exp2)
+--         | "-"  -> evalExpr(st, exp1) -  evalExpr(st, exp2)
+--         | "/"  -> evalExpr(st, exp1) /  evalExpr(st, exp2)
+--         | "%"  -> evalExpr(st, exp1) %  evalExpr(st, exp2)
+--         | "<"  -> evalExpr(st, exp1) <  evalExpr(st, exp2)
+--         | "<=" -> evalExpr(st, exp1) <= evalExpr(st, exp2)
+--         | ">"  -> evalExpr(st, exp1) >  evalExpr(st, exp2)
+--         | ">=" -> evalExpr(st, exp1) >= evalExpr(st, exp2)
+--         | "!!" -> evalExpr(st, exp1) !! evalExpr(st, exp2)
+--         | "&&" -> evalExpr(st, exp1) && evalExpr(st, exp2)
+--         | "==" -> evalExpr(st, exp1) == evalExpr(st, exp2)
+--         | "!=" -> evalExpr(st, exp1) != evalExpr(st, exp2)
+--       esac
+--     )
+--   esac
+-- }
+
 
 -- Evaluates a program with a given input and returns an output
 public fun evalExpr (input, expr) {

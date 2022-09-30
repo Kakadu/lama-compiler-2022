@@ -59,9 +59,67 @@ fun fromLabel (env, lab) {
 
 -- Stack machine interpreter. Takes an environment, an SM-configuration and a program,
 -- returns a final configuration
+
 fun eval (env, c, insns) {
   failure ("SM eval not implemented\n")
 }
+
+-- fun eval (c, insns) {
+--   var stack = makeArray(200);
+--   var top = -1;
+--   var state = c[1];
+--   fun run_cmd(cmd) {
+--     case cmd of
+--       READ      -> (
+--         var k = readWorld(c[2]); 
+--         c[2] := k[1];
+--         top := top + 1;
+--         stack[top] := k[0]
+--       )
+--     | WRITE     -> (
+--       c[2] := writeWorld(stack[top], c[2])
+--     )
+--     | BINOP (s) -> (
+--       var b = stack[top];
+--       var a = stack[top - 1];
+--       top := top - 1;
+--       (
+--         case s of 
+--              "*" -> stack[top]  := a *  b
+--           |  "+"  -> stack[top] := a +  b 
+--           |  "-"  -> stack[top] := a -  b
+--           |  "/"  -> stack[top] := a /  b
+--           |  "%"  -> stack[top] := a %  b
+--           |  "<"  -> stack[top] := a <  b
+--           |  ">"  -> stack[top] := a >  b 
+--           |  "<=" -> stack[top] := a <= b
+--           |  ">=" -> stack[top] := a >= b
+--           |  "&&" -> stack[top] := a && b
+--           |  "!!" -> stack[top] := a !! b
+--           |  "==" -> stack[top] := a == b
+--           |  "!=" -> stack[top] := a != b
+--         esac
+--       )
+
+--     )
+--     | LD    (x) -> (
+--       top := top + 1;
+--       stack[top]:= state(x) 
+--     )
+--     | ST    (x) -> (
+--       state := (state <- [x, stack[top]]);
+--       top := top - 1
+--     )
+--     | CONST (n) -> (
+--       top := top + 1;
+--       stack[top] := n
+--     )
+--     esac
+--   }
+--   map (run_cmd, insns);
+--   c[1] := state;
+--   c
+-- }
 
 -- Runs a stack machine for a given input and a given program, returns an output
 public fun evalSM (input, insns) {
@@ -98,6 +156,17 @@ fun genLabels (env, n) {
   listArray (inner (env, n))
 }
 
+-- fun compileExpr (expr) {
+--   case expr of
+--       Var (s) -> {LD (s)}
+--     | Const (i) -> {CONST (i)}
+--     | Binop (s, exp1, exp2) -> (
+--       compileExpr(exp1) +++ compileExpr(exp2) +++ {BINOP (s)}
+--     )
+--   esac
+-- }
+
+
 -- Compiles an expression into a stack machine code.
 -- Takes an expression, returns a list of stack machine
 -- instructions.
@@ -125,4 +194,18 @@ public fun compileSM (stmt) {
          [endLabUsed, _, code] -> getBuffer $ code <+> label (endLab, endLabUsed) 
        esac
   esac
+
+  -- fun build_cmd_list (stmt) {
+  --   case stmt of
+  --     Assn (s, expr) -> compileExpr(expr) +++ {ST (s)}
+  --   | Seq (x, y) -> (
+  --     build_cmd_list(x) +++ build_cmd_list(y)
+  --   )
+  --   | Skip -> {}
+  --   | Read (s) -> READ : {ST (s)}
+  --   | Write (expr) -> compileExpr(expr) +++ {WRITE}
+  -- esac
+  -- }
+
+  -- build_cmd_list(stmt)
 }
