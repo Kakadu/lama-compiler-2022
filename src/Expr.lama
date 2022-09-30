@@ -3,6 +3,23 @@
 import List;
 import State;
 
+public fun evalBinOp (op, lhs, rhs) {
+  case op of
+    "+"  -> lhs + rhs
+  | "-"  -> lhs - rhs
+  | "*"  -> lhs * rhs
+  | "/"  -> lhs / rhs
+  | "%"  -> lhs % rhs
+  | "<"  -> lhs < rhs
+  | ">"  -> lhs > rhs
+  | "<=" -> lhs <= rhs
+  | ">=" -> lhs >= rhs
+  | "==" -> lhs == rhs
+  | "!=" -> lhs != rhs
+  | "&&" -> lhs && rhs
+  | "!!" -> lhs !! rhs
+  esac
+}
 
 -- The evaluator itself: takes a state and an expression,
 -- returns integer value
@@ -13,6 +30,10 @@ import State;
 --        Const (int)                |
 --        Binop (string, expr, expr)
 
-public fun evalExpr (st, expr) {
-  failure ("evalExpr not implemented\n")
+public fun evalExpr (state, expr) {
+  case expr of
+    Var (name)           -> state (name)
+  | Const (const)        -> const
+  | Binop (op, lhs, rhs) -> evalBinOp (op, evalExpr (state, lhs), evalExpr (state, rhs))
+  esac
 }
