@@ -2,3 +2,6 @@
 *.o
 *.i
 *.s
+
+#tests
+regression/
