@@ -1,0 +1,4 @@
+# lama files
+*.o
+*.i
+*.s
