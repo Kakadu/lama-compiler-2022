@@ -31,7 +31,7 @@ public fun evalBinop(op, expr1, expr2) {
 --        Const (int)                |
 --        Binop (string, expr, expr)
 
-public fun evalExpr (st, expr) {
+public fun evalExpr (state, expr) {
   case expr of 
     Var(x)                    -> state(x)
     | Const(x)                -> x
