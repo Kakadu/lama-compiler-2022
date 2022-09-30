@@ -17,7 +17,26 @@ import World;
 --        Write  (expr)             |
 
 fun eval (c, stmt) {
-  failure ("Stmt eval not implemented\n")
+  var state = c[0];
+  case stmt of
+      Assn (s, expr) -> (
+        state := (state <- [s, evalExpr(state, expr)])
+      )
+    | Seq (x, y) -> eval(c, x); eval(c, y)
+    | Skip -> skip
+    | Read (s) -> (
+        var k = readWorld(c[1]);
+        c[1] := k[1];
+        state := (state <- [s, k[0]])
+      )
+    | Write (expr) -> (
+      var r;
+      r := evalExpr(state, expr);
+      c[1] := writeWorld(r, c[1])
+    )
+  esac;
+  c[0] := state;
+  c
 }
 
 -- Evaluates a program with a given input and returns an output
