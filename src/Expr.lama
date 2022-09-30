@@ -23,9 +23,17 @@ public fun evalExpr (st, expr) {
 
 fun perform_binop (op, left, right) {
   case op of
-    "+" -> left + right
-  | "-" -> left - right
-  | "*" -> left * right
-  | "/" -> left / right
+    "+"  -> left + right
+  | "-"  -> left - right
+  | "*"  -> left * right
+  | "/"  -> left / right
+  | "%"  -> left % right
+  | "<"  -> left < right
+  | ">"  -> left > right
+  | "<=" -> left <= right
+  | "="  -> left = right
+  | "!=" -> left != right
+  | "&&" -> left && right
+  | "!!" -> left !! right
   esac
 }
