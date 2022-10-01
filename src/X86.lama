@@ -33,8 +33,8 @@ var wordSize = 4;
 --    L (int)    -- an immediate operand             
 
 -- Some x86 instruction (we do not need all of them):
---   Mov   (opnd, opnd)         -- copies a value from the first to the second operand  
 --   Binop (string, opnd, opnd) -- makes a binary operation; note, the first operand   
+--   Mov   (opnd, opnd)         -- copies a value from the first to the second operand  
 --                                 designates x86 operator, not the source language one
 --   IDiv  (opnd)               -- x86 integer division, see instruction set reference 
 --   Cltd                       -- see instruction set reference           
@@ -287,10 +287,59 @@ fun compile (env, code) {
           case env.pop of
             [s, env] -> [env, code <+ Push (s) <+ Call ("Lwrite") <+ Pop (eax)]
           esac
-      | _ -> failure ("codegeneration for instruction %s is not yet implemented\n", i.string)
+      | CONST (n) ->
+          case env.allocate of
+            [s, env] -> [env, code <+> move(L(n), s)]
+          esac
+      | LD (varname) -> 
+          case env.addGlobal(varname).allocate of
+            [s, env] -> [env, code <+> move(env.loc(varname), s)]
+          esac
+      | ST (varname) ->
+          case env.pop of
+            [s, env] -> [env, code <+> move(s, env.loc(varname))]
+          esac
+      | BINOP (op) ->
+        case env.pop2 of
+          [right, left, env] ->
+            case env.allocate of
+              [result, env] -> [env.push(result), code <+> binop(op, left, right, result)]
+            esac
+        esac
       esac
     }, [env, emptyBuffer ()], code)
 }
+
+
+fun binop(op, left, right, result) {
+
+  fun opType(op) {
+    case op of
+      "+" -> SimpleEax(op)
+    | "-" -> SimpleEax(op)
+    | "*" -> SimpleEax(op)
+    | "&&" -> SimpleEax(op)
+    | "!!" -> SimpleEax(op)
+
+    | "/" -> Div
+    | "%" -> Mod
+
+    | _ -> Cmp(op)
+    esac
+  }
+
+  fun genDivision(left, right) {
+    move(left, eax) <+> move(right, ebx) <+ Cltd <+ IDiv(ebx)
+  }
+
+  case opType(op) of
+    SimpleEax(op) -> move(left, eax) <+ Binop(op, right, eax) <+ move(eax, result)
+  | Div -> genDivision(left, right) <+> move(eax, result)
+  | Mod -> genDivision(left, right) <+> move(edx, result)
+  | Cmp(op) -> Binop("cmp", left, right) <+ Set(suffix(op), "%eax") <+> move(eax, result)
+  esac
+}
+
 
 -- A top-level codegeneration function. Takes a stack machine program
 -- and returns x86 listing as a string
