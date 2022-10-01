@@ -297,7 +297,10 @@ fun compile (env, code) {
           esac
       | ST (varname) ->
           case env.pop of
-            [s, env] -> [env, code <+> move(s, env.loc(varname))]
+            [s, env] ->
+              case env.addGlobal(varname) of
+                end -> [env, code <+> move(s, env.loc(varname))]
+              esac
           esac
       | BINOP (op) ->
         case env.pop2 of
@@ -312,7 +315,6 @@ fun compile (env, code) {
 
 
 fun binop(op, left, right, result) {
-
   fun opType(op) {
     case op of
       "+" -> SimpleEax(op)
@@ -333,10 +335,10 @@ fun binop(op, left, right, result) {
   }
 
   case opType(op) of
-    SimpleEax(op) -> move(left, eax) <+ Binop(op, right, eax) <+ move(eax, result)
+    SimpleEax(op) -> move(left, eax) <+ move(right, edx) <+ Binop(op, edx, eax) <+ move(eax, result)
   | Div -> genDivision(left, right) <+> move(eax, result)
   | Mod -> genDivision(left, right) <+> move(edx, result)
-  | Cmp(op) -> Binop("cmp", left, right) <+ Set(suffix(op), "%eax") <+> move(eax, result)
+  | Cmp(op) -> emptyBuffer() <+ Binop("cmp", left, right) <+ Set(suffix(op), "%eax") <+> move(eax, result)
   esac
 }
 
