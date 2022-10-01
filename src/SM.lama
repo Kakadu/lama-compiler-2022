@@ -26,12 +26,12 @@ public fun showSM (prg) {
 
 fun evalIns ([stack, st, w], ins) {
   case ins of
-    READ         -> case readWorld (w) of [val, w1] -> [val : stack, st, w1] esac
+    READ         -> case readWorld (w) of [v, w1] -> [v : stack, st, w1] esac
   | WRITE        -> case stack of h : tl -> [tl, st, writeWorld (h, w)] esac
   | BINOP (op)   -> case stack of left : right : tl -> [evalBinop (op, left, right) : tl, st, w] esac
   | LD    (name) -> [st (name) : stack, st, w]
-  | ST    (name) -> case stack of h : tl -> [tl, st <- [name, h], w]
-  | CONST (val)  -> [val : stack, st, w]
+  | ST    (name) -> case stack of h : tl -> [tl, st <- [name, h], w] esac
+  | CONST (v)  -> [v : stack, st, w]
   esac
 }
 
@@ -54,7 +54,7 @@ public fun evalSM (input, insns) {
 fun compileExpr (expr) {
   case expr of
     Var   (name)            -> singletonBuffer (LD (name))
-  | Const (val)             -> singletonBuffer (CONST (val))
+  | Const (v)               -> singletonBuffer (CONST (v))
   | Binop (op, left, right) -> compileExpr (left) <+> compileExpr (right) <+ BINOP (op)
   esac
 }
@@ -68,6 +68,6 @@ public fun compileSM (stmt) {
   | Skip               -> emptyBuffer ()
   | Read  (name)       -> singletonBuffer (READ) <+ ST (name)
   | Write (expr)       -> compileExpr (expr) <+ WRITE
-  | Seq   (fst, snd)   -> compile (fst) <+> compile (snd)
+  | Seq   (fst, snd)   -> compileSM (fst) <+> compileSM (snd)
   esac
 }

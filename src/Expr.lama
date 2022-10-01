@@ -34,7 +34,7 @@ public fun evalBinop (op, left, right) {
 public fun evalExpr (st, expr) {
   case expr of
     Var   (name)            -> st (name)
-  | Const (val)             -> val
-  | Binop (op, left, right) -> evalBinop (op, evalExpr (left), evalExpr (right))
+  | Const (v)               -> v
+  | Binop (op, left, right) -> evalBinop (op, evalExpr (st, left), evalExpr (st, right))
   esac
 }
