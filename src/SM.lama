@@ -52,7 +52,7 @@ fun compileExpr (expr) {
   case expr of 
     Const (n) -> singletonBuffer (CONST (n))
   | Var (x) -> singletonBuffer (LD (x))
-  | Binop (binop, lexpr, rexpr) -> compileExpr(lexpr) <+> compileExpr(rexpr) <+ BINOP (binop)
+  | Binop (binop, expr1, expr2) -> compileExpr(expr1) <+> compileExpr(expr2) <+ BINOP (binop)
   esac
 }
 
