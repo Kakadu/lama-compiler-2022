@@ -24,10 +24,36 @@ public fun showSM (prg) {
   map (fun (i) {showSMInsn (i) ++ "\n"}, prg).stringcat
 }
 
+-- One stack machine's instruction interpreter. Takes an SM-configuration and an instruction,
+-- returns a final configuration
+fun evalInst (c, inst) {
+  var stack = c[0], state = c[1], world = c[2];
+
+  case inst of
+    -- below num:stack is not a pattern matching, it's a list constructor
+    READ      -> case readWorld (world) of [num, new_world] -> [num:stack, state, new_world] esac
+    -- below num:tail is a pattern matching
+  | WRITE     -> case stack of num:tail -> [tail, state, writeWorld (num, world)] esac
+    -- note that x and y are swapped
+  | BINOP (s) -> case stack of x:y:tail -> [evalBinop (s, y, x):tail, state, world] esac
+  | LD    (x) -> [state (x):stack, state, world]
+  | ST    (x) -> case stack of num:tail -> [tail, state <- [x, num], world] esac
+  | CONST (n) -> [n:stack, state, world]
+  esac
+}
+
+fun evalListOfInst (c, insns) {
+  case insns of
+    {} -> c
+  | inst:tail -> evalListOfInst (evalInst (c, inst), tail)
+  esac
+}
+
 -- Stack machine interpreter. Takes an SM-configuration and a program,
 -- returns a final configuration
 fun eval (c, insns) {
-  failure ("SM eval not implemented\n")
+  -- insns is a stdlib's buffer of instructions, but we want to work with lists
+  evalListOfInst (c, getBuffer (insns))
 }
 
 -- Runs a stack machine for a given input and a given program, returns an output
@@ -38,12 +64,22 @@ public fun evalSM (input, insns) {
 -- Compiles an expression into a stack machine code.
 -- Takes an expression, returns a list of stack machine instructions
 fun compileExpr (expr) {
-  failure ("compileExpr not implemented\n")
+  case expr of
+    Var   (var_as_str)                       -> singletonBuffer (LD (var_as_str))
+  | Const (num)                              -> singletonBuffer (CONST (num))
+  | Binop (op_as_str, left_expr, right_expr) -> compileExpr (left_expr) <+> compileExpr (right_expr) <+ BINOP (op_as_str)
+  esac
 }
 
 -- Compiles a statement into a stack machine code.
 -- Takes a statement, returns a list of stack machine
 -- instructions.
 public fun compileSM (stmt) {
-  failure ("compileSM not implemented\n")
+  case stmt of
+    Assn  (var_as_str, expr)      -> compileExpr (expr) <+ ST (var_as_str)
+  | Seq   (left_stmt, right_stmt) -> compileSM (left_stmt) <+> compileSM (right_stmt)
+  | Skip                          -> emptyBuffer ()
+  | Read  (name_of_var)           -> emptyBuffer () <+ READ <+ ST (name_of_var)
+  | Write (expr)                  -> compileExpr (expr) <+ WRITE
+  esac
 }
