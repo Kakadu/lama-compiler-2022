@@ -64,62 +64,41 @@ fun eval (env, c, insns) {
   failure ("SM eval not implemented\n")
 }
 
--- fun eval (c, insns) {
---   var stack = makeArray(200);
---   var top = -1;
---   var state = c[1];
---   fun run_cmd(cmd) {
---     case cmd of
---       READ      -> (
---         var k = readWorld(c[2]); 
---         c[2] := k[1];
---         top := top + 1;
---         stack[top] := k[0]
---       )
---     | WRITE     -> (
---       c[2] := writeWorld(stack[top], c[2])
---     )
---     | BINOP (s) -> (
---       var b = stack[top];
---       var a = stack[top - 1];
---       top := top - 1;
---       (
---         case s of 
---              "*" -> stack[top]  := a *  b
---           |  "+"  -> stack[top] := a +  b 
---           |  "-"  -> stack[top] := a -  b
---           |  "/"  -> stack[top] := a /  b
---           |  "%"  -> stack[top] := a %  b
---           |  "<"  -> stack[top] := a <  b
---           |  ">"  -> stack[top] := a >  b 
---           |  "<=" -> stack[top] := a <= b
---           |  ">=" -> stack[top] := a >= b
---           |  "&&" -> stack[top] := a && b
---           |  "!!" -> stack[top] := a !! b
---           |  "==" -> stack[top] := a == b
---           |  "!=" -> stack[top] := a != b
---         esac
---       )
-
---     )
---     | LD    (x) -> (
---       top := top + 1;
---       stack[top]:= state(x) 
---     )
---     | ST    (x) -> (
---       state := (state <- [x, stack[top]]);
---       top := top - 1
---     )
---     | CONST (n) -> (
---       top := top + 1;
---       stack[top] := n
---     )
---     esac
---   }
---   map (run_cmd, insns);
---   c[1] := state;
---   c
+-- fun evalBinOp (a, b, op) {
+--   case op of 
+--      "*"  -> a *  b
+--   |  "+"  -> a +  b 
+--   |  "-"  -> a -  b
+--   |  "/"  -> a /  b
+--   |  "%"  -> a %  b
+--   |  "<"  -> a <  b
+--   |  ">"  -> a >  b 
+--   |  "<=" -> a <= b
+--   |  ">=" -> a >= b
+--   |  "&&" -> a && b
+--   |  "!!" -> a !! b
+--   |  "==" -> a == b
+--   |  "!=" -> a != b
+--   esac
 -- }
+
+-- fun evalCmd ([stack, state, wrld], cmd) {
+--   case cmd of
+--     READ      -> case readWorld(wrld) of [n, w] -> [{n} +++ stack, state, w] esac
+--   | WRITE     -> [stack.tl, state, writeWorld(stack.hd, wrld)]
+--   | BINOP (s) -> [{evalBinOp(stack.tl.hd, stack.hd, s)} +++ stack.tl.tl, state, wrld]
+--   | LD    (x) -> [{state(x)} +++ stack, state, wrld]
+--   | ST    (x) -> [stack.tl, state <- [x, stack.hd], wrld]
+--   | CONST (n) -> [{n} +++ stack, state, wrld]
+--   esac
+-- }
+
+-- -- Stack machine interpreter. Takes an SM-configuration and a program,
+-- -- returns a final configuration
+-- fun eval (c, insns) {
+--   foldl (evalCmd, c, insns)
+-- }
+
 
 -- Runs a stack machine for a given input and a given program, returns an output
 public fun evalSM (input, insns) {
