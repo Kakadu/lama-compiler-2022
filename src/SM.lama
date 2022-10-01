@@ -27,23 +27,55 @@ public fun showSM (prg) {
 -- Stack machine interpreter. Takes an SM-configuration and a program,
 -- returns a final configuration
 fun eval (c, insns) {
-  failure ("SM eval not implemented\n")
+  foldl (evalInstruction, c, insns)
+}
+
+fun evalInstruction(c, insn) {
+  var stack = c[0];
+  var state = c[1];
+  var world = c[2];
+  case insn of
+    BINOP (op) ->
+      var y = stack.hd;
+      var x = stack.tl.hd;
+      var value = evalBinop (op, x, y);
+      [value:stack.tl.tl, state, world]  
+  | CONST (n) -> [n:stack, state, world]
+  | READ ->
+      var resultPair = readWorld(world);
+      var value = resultPair[0];
+      var newWorld = resultPair[1];
+      [value:stack, state, newWorld]
+  | WRITE -> [stack.tl, state, writeWorld(stack.hd, world)]
+  | LD (name) -> [state (name):stack, state, world]
+  | ST (name) -> [stack.tl, state <- [name, stack.hd], world]
+  esac
 }
 
 -- Runs a stack machine for a given input and a given program, returns an output
 public fun evalSM (input, insns) {
-  eval ([{}, emptyState, createWorld (input)], insns)[2].getOutput
+  eval ([{}, emptyState, createWorld (input)], getBuffer (insns))[2].getOutput
 }
 
 -- Compiles an expression into a stack machine code.
 -- Takes an expression, returns a list of stack machine instructions
 fun compileExpr (expr) {
-  failure ("compileExpr not implemented\n")
+  case expr of
+    Var (x) -> singletonBuffer (LD (x))
+  | Const (n) -> singletonBuffer (CONST (n))
+  | Binop (op, l, r) -> compileExpr (l) <+> compileExpr (r) <+ BINOP (op)
+  esac
 }
 
 -- Compiles a statement into a stack machine code.
 -- Takes a statement, returns a list of stack machine
 -- instructions.
 public fun compileSM (stmt) {
-  failure ("compileSM not implemented\n")
+  case stmt of
+    Assn (name, expr) -> compileExpr (expr) <+ ST (name)
+  | Seq (stmt1, stmt2) -> compileSM (stmt1) <+> compileSM (stmt2)
+  | Skip -> emptyBuffer ()
+  | Read (name) -> singletonBuffer (READ) <+ ST (name)
+  | Write (expr) -> compileExpr (expr) <+ WRITE
+  esac
 }
