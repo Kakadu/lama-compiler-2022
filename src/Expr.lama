@@ -13,6 +13,30 @@ import State;
 --        Const (int)                |
 --        Binop (string, expr, expr)
 
+public fun evalBinop (op_as_str, x, y) {
+  case op_as_str of
+    "!!" -> x !! y
+  | "&&" -> x && y
+  | "==" -> x == y
+  | "!=" -> x != y
+  | "<=" -> x <= y
+  | "<"  -> x < y
+  | ">=" -> x >= y
+  | ">"  -> x > y
+  | "+"  -> x + y
+  | "-"  -> x - y
+  | "*"  -> x * y
+  | "/"  -> x / y
+  | "%"  -> x % y
+  | _    -> failure("evalBinop: unknown operator '%s'\n", op_as_str)
+  esac
+}
+
 public fun evalExpr (st, expr) {
-  failure ("evalExpr not implemented\n")
+  case expr of
+    Var   (var_as_str)                       -> st (var_as_str)
+  | Const (num)                              -> num
+  | Binop (op_as_str, left_expr, right_expr) ->
+      evalBinop (op_as_str, evalExpr (st, left_expr), evalExpr (st, right_expr))
+  esac
 }
