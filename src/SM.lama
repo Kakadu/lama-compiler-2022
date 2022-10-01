@@ -28,7 +28,7 @@ fun evalIns ([stack, st, w], ins) {
   case ins of
     READ         -> case readWorld (w) of [v, w1] -> [v : stack, st, w1] esac
   | WRITE        -> case stack of h : tl -> [tl, st, writeWorld (h, w)] esac
-  | BINOP (op)   -> case stack of left : right : tl -> [evalBinop (op, left, right) : tl, st, w] esac
+  | BINOP (op)   -> case stack of right : left : tl -> [evalBinop (op, left, right) : tl, st, w] esac
   | LD    (name) -> [st (name) : stack, st, w]
   | ST    (name) -> case stack of h : tl -> [tl, st <- [name, h], w] esac
   | CONST (v)  -> [v : stack, st, w]
@@ -59,15 +59,19 @@ fun compileExpr (expr) {
   esac
 }
 
--- Compiles a statement into a stack machine code.
--- Takes a statement, returns a list of stack machine
--- instructions.
-public fun compileSM (stmt) {
+fun compileToBuf (stmt) {
   case stmt of 
     Assn  (name, expr) -> compileExpr (expr) <+ ST (name)
   | Skip               -> emptyBuffer ()
   | Read  (name)       -> singletonBuffer (READ) <+ ST (name)
   | Write (expr)       -> compileExpr (expr) <+ WRITE
-  | Seq   (fst, snd)   -> compileSM (fst) <+> compileSM (snd)
+  | Seq   (fst, snd)   -> compileToBuf (fst) <+> compileToBuf (snd)
   esac
+}
+
+-- Compiles a statement into a stack machine code.
+-- Takes a statement, returns a list of stack machine
+-- instructions.
+public fun compileSM (stmt) {
+  getBuffer (compileToBuf (stmt))
 }
