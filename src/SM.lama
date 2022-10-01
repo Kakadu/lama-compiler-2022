@@ -27,24 +27,57 @@ public fun showSM (prg) {
 -- Stack machine interpreter. Takes an SM-configuration and a program,
 -- returns a final configuration
 fun eval (c, insns) {
-  failure ("SM eval not implemented\n")
+  var stack = c[0];
+  var state = c[1];
+  var world = c[2];
+
+  case insns of
+    READ:other ->
+      case readWorld(world) of [value, new_world] ->
+        eval([value:stack, state, new_world], other) esac
+  | WRITE:other ->
+      case stack of value:tail ->
+        eval([tail, state, writeWorld(value, world)], other) esac
+  | BINOP (op):other ->
+      case stack of r:l:tail ->
+        eval([evalBinop(op, l, r):tail, state, world], other) esac
+  | ST (var_name):other -> 
+      case stack of value:tail ->
+        eval([tail, state <- [var_name, value], world], other) esac
+  | LD (var_name):other ->
+      eval([state(var_name):stack, state, world], other)
+  | CONST (value):other -> 
+      eval([value:stack, state, world], other)
+  | {} ->
+      c
+  esac
 }
 
 -- Runs a stack machine for a given input and a given program, returns an output
-public fun evalSM (input, insns) {
-  eval ([{}, emptyState, createWorld (input)], insns)[2].getOutput
+public fun evalSM (input, insns_buf) {
+  eval ([{}, emptyState, createWorld (input)], getBuffer(insns_buf))[2].getOutput
 }
 
 -- Compiles an expression into a stack machine code.
 -- Takes an expression, returns a list 
 -- of stack machine instructions
 fun compileExpr (expr) {
-  failure ("compileExpr not implemented\n")
+  case expr of
+    Const (value)     -> singletonBuffer(CONST (value))
+  | Var   (var_name)  -> singletonBuffer(LD (var_name))
+  | Binop (op, l, r)  -> compileExpr(l) <+> compileExpr(r) <+ BINOP (op)
+  esac
 }
 
 -- Compiles a statement into a stack machine code.
 -- Takes a statement, returns a list of stack machine
 -- instructions.
 public fun compileSM (stmt) {
-  failure ("compileSM not implemented\n")
+  case stmt of
+    Skip -> emptyBuffer()
+  | Assn  (var_name, expr) -> compileExpr(expr) <+ ST (var_name)
+  | Seq   (stmt1, stmt2)   -> compileSM(stmt1) <+> compileSM(stmt2)
+  | Read  (var_name)       -> listBuffer({READ, ST (var_name)})
+  | Write (expr)           -> compileExpr(expr) <+ WRITE
+  esac
 }
