@@ -1,7 +1,2 @@
-src/*.o
-src/*.s
-src/*.i
-
-regression/*.i
-regression/*.s
-regression/*.log
+*.i
+*.s
