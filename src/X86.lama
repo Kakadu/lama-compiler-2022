@@ -46,7 +46,17 @@ var wordSize = 4;
 --   Call  (string)             -- calls a function by its name 
 --   Ret                        -- returns from a function
 --   Meta  (string)             -- metainformation (declarations, etc.)
-                                                               
+
+
+fun opndString (opnd) {
+    case opnd of
+      R (i) -> regs [i]
+    | S (i) -> sprintf ("-%d(%%ebp)", (i+1) * wordSize)
+    | M (x) -> x
+    | L (i) -> sprintf ("$%d", i)
+    esac
+  }
+
 -- Machine instruction printer
 fun insnString (insn) {
   
@@ -62,14 +72,7 @@ fun insnString (insn) {
     esac
   }
 
-  fun opndString (opnd) {
-    case opnd of
-      R (i) -> regs [i]
-    | S (i) -> sprintf ("-%d(%%ebp)", (i+1) * wordSize)
-    | M (x) -> x
-    | L (i) -> sprintf ("$%d", i)
-    esac
-  }
+
   
   case insn of
     Cltd               -> "\tcltd\n"
@@ -99,7 +102,7 @@ fun makeEnv (stack, stackSlots, globals) {
 
   -- Returns a string representation of the environment
   fun envString () {
-    sprintf ("Stack     : %s\nStackSlots: %d\nGlobals   : %s\n", stack.string, stackSlots, elements (globals).string)
+    sprintf ("Stack     : %s\n# StackSlots: %d\n# Globals   : %s\n", stack.string, stackSlots, elements (globals).string)
   }
   
   -- Allocates a new position on the symbolic stack;
@@ -277,7 +280,7 @@ fun suffix (op) {
 fun compile (env, code) {
   foldl (
     fun ([env, scode], i) {
-      var code = scode <+ Meta ("# " ++ showSMInsn (i) ++ "\n");
+      var code = scode <+ Meta ("# " ++ showSMInsn (i) ++ "\n") <+ Meta ("# " ++ envString(env));
       case i of
         READ ->
           case env.allocate of
@@ -306,7 +309,10 @@ fun compile (env, code) {
         case env.pop2 of
           [right, left, env] ->
             case env.allocate of
-              [result, env] -> [env.push(result), code <+> binop(op, left, right, result)]
+              [result, env] -> (
+                var meta = Meta ("# " ++ opndString(left) ++ " " ++ op ++ " " ++ opndString(right) ++ " to " ++ opndString(result) ++ "\n");
+                [env, code <+> singletonBuffer(meta) <+> binop(op, left, right, result)]
+              )
             esac
         esac
       esac
@@ -330,15 +336,17 @@ fun binop(op, left, right, result) {
     esac
   }
 
+  --- Can only use these registers for intermediate results: "%edi", "%eax", "%edx", "%ebp", "%esp"
+
   fun genDivision(left, right) {
-    move(left, eax) <+> move(right, ebx) <+ Cltd <+ IDiv(ebx)
+    move(left, eax) <+> move(right, edi) <+ Cltd <+ IDiv(edi)
   }
 
   case opType(op) of
     SimpleEax(op) -> move(left, eax) <+> move(right, edx) <+ Binop(op, edx, eax) <+> move(eax, result)
   | Div -> genDivision(left, right) <+> move(eax, result)
   | Mod -> genDivision(left, right) <+> move(edx, result)
-  | Cmp(op) -> emptyBuffer() <+ Binop("cmp", left, right) <+ Set(suffix(op), "%eax") <+> move(eax, result)
+  | Cmp(op) -> emptyBuffer() <+ Binop("cmp", right, left) <+ Mov(L(0), eax) <+ Set(suffix(op), "%al") <+> move(eax, result)
   esac
 }
 
