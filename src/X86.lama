@@ -335,7 +335,7 @@ fun binop(op, left, right, result) {
   }
 
   case opType(op) of
-    SimpleEax(op) -> move(left, eax) <+ move(right, edx) <+ Binop(op, edx, eax) <+ move(eax, result)
+    SimpleEax(op) -> move(left, eax) <+> move(right, edx) <+ Binop(op, edx, eax) <+> move(eax, result)
   | Div -> genDivision(left, right) <+> move(eax, result)
   | Mod -> genDivision(left, right) <+> move(edx, result)
   | Cmp(op) -> emptyBuffer() <+ Binop("cmp", left, right) <+ Set(suffix(op), "%eax") <+> move(eax, result)
