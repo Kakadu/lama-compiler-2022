@@ -114,7 +114,7 @@ fun makeEnv (stack, stackSlots, globals) {
       | R (n) : _ -> if n < nRegs then [R (n+1), stackSlots] else [S (0), 1] fi
       | _         -> [S (0), 1]
       esac
-    of [x, n] -> [x, makeEnv (x : stack, if n > stackSlots then n else stackSlots fi, globals)]esac
+    of [x, n] -> [x, makeEnv (x : stack, if n > stackSlots then n else stackSlots fi, globals)] esac
   }
 
   -- Pushes an item on the symbolic state; returns an updated envirtonment
@@ -147,7 +147,7 @@ fun makeEnv (stack, stackSlots, globals) {
   fun loc (name) {
     M (globalName (name))
   }
-  
+
   -- Gets a list of global variables from the environment
   fun getGlobals () {
     globals.elements
@@ -239,7 +239,7 @@ fun stackOpnd (opnd) {
   case opnd of
     S (_) -> true
   | _     -> false
-  esac      
+  esac
 }
 
 -- Checks if an operand resides in memory
@@ -283,12 +283,55 @@ fun compile (env, code) {
         READ ->
           case env.allocate of
             [s, env] -> [env, code <+ Call ("Lread") <+ Mov (eax, s)]
-          esac             
+          esac
       | WRITE ->
           case env.pop of
             [s, env] -> [env, code <+ Push (s) <+ Call ("Lwrite") <+ Pop (eax)]
           esac
-      | _ -> failure ("codegeneration for instruction %s is not yet implemented\n", i.string)
+      | ST (x) ->
+          case env.pop of
+            [s, env] -> (
+                var newEnv = env.addGlobal(x);
+                [newEnv, code <+ Mov (s, newEnv.loc(x))]
+            )
+          esac
+      | LD (x) ->
+          case env.allocate of
+            [s, env] -> [env, code <+ Mov (env.loc(x), s)]
+          esac
+      | CONST (n) ->
+          case env.allocate of
+            [s, env] -> [env, code <+ Mov (L(n), s)]
+          esac
+      | BINOP (binop) ->
+          case env.pop2 of
+            [y, x, env] -> (
+                [env.push(x),
+                    code <+>
+                    if compare(binop, "+") == 0 !! compare(binop, "-") == 0 !! compare(binop, "*") == 0 then
+                         if memOpnd(x)
+                         then singletonBuffer(Mov (x, eax)) <+ Binop (binop, y, eax) <+ Mov (eax, x)
+                         else singletonBuffer(Binop (binop, y, x))
+                         fi
+                    elif compare(binop, "/") == 0 !! compare(binop, "%") == 0 then
+                         singletonBuffer(Mov (x, eax)) <+ Cltd <+ IDiv(y) <+ Mov (if compare(binop, "/") == 0 then eax else edx fi, x)
+                    elif compare(binop, "<") == 0 !! compare(binop, ">") == 0 !!
+                         compare(binop, "<=") == 0 !! compare(binop, ">=") == 0 !!
+                         compare(binop, "==") == 0 !! compare(binop, "!=") == 0 then
+                         singletonBuffer(Binop ("^", eax, eax)) <+>
+                         if memOpnd(x)
+                         then singletonBuffer(Mov (x, edx)) <+ Binop ("cmp", y, edx)
+                         else singletonBuffer(Binop ("cmp", y, x))
+                         fi <+ Set (suffix(binop), "%al") <+ Mov (eax, x)
+                    elif compare(binop, "!!") == 0 !! compare(binop, "&&") == 0 then
+                         singletonBuffer(Mov (x, eax)) <+ Binop ("cmp", L(0), eax) <+ Binop ("^", eax, eax) <+ Set ("ne", "%al") <+
+                         Mov (y, edx) <+ Binop ("cmp", L(0), edx) <+ Binop ("^", edx, edx) <+ Set ("ne", "%dl") <+
+                         Binop (binop, edx, eax) <+ Mov (eax, x)
+                    else failure ("codegeneration for instruction %s is not yet implemented\n", binop)
+                    fi
+                ]
+            )
+          esac
       esac
     }, [env, emptyBuffer ()], code)
 }
@@ -303,9 +346,9 @@ public fun compileX86 (args, code) {
                        #val  -> "../runtime/"
                      | path  -> path
                      esac ++ "/runtime.o";
-       
+
        fwrite (asmFile,
-               map (insnString, 
+               map (insnString,
                     getBuffer $
                       singletonBuffer (Meta ("\t.global\tmain\n")) <+>
                       dataSection (listBuffer $ map (dataDef, getGlobals (env))) <+>
@@ -316,7 +359,7 @@ public fun compileX86 (args, code) {
                         epilogue ()
                       )
                     ).stringcat);
-                    
+
        system ({"gcc -g -m32 -o ", args.getBaseName, " ", runtime, " ", asmFile}.stringcat)
   esac
 }
