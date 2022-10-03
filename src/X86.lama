@@ -28,16 +28,16 @@ var ebx = R (0),
 var wordSize = 4;
 
 -- We need to distinguish the following operand types: 
---    R (int)       -- hard register                    
---    S (int)       -- a position on the hardware stack 
---    M (string)    -- a named memory location          
+--    R (int)       -- hard register
+--    S (int)       -- a position on the hardware stack
+--    M (string)    -- a named memory location
 --    L (int)       -- an immediate operand
 --    I (int, opnd) -- an indirect operand with offset
 
 -- Some x86 instruction (we do not need all of them):
 --   Mov   (opnd, opnd)         -- copies a value from the first to the second operand  
 --   Lea   (opnd, opnd)         -- loads an address of the first operand into the second
---   Binop (string, opnd, opnd) -- makes a binary operation; note, the first operand   
+--   Binop (string, opnd, opnd) -- makes a binary operation; note, the first operand
 --                                 designates x86 operator, not the source language one
 --   IDiv  (opnd)               -- x86 integer division, see instruction set reference 
 --   Cltd                       -- see instruction set reference           
@@ -70,12 +70,10 @@ fun insnString (insn) {
 
   fun opndString (opnd) {
     case opnd of
-      R (i)    -> regs [i]
-    | S (i)    -> sprintf ("-%d(%%ebp)", (i+1) * wordSize)
-    | M (x)    -> x
-    | L (i)    -> sprintf ("$%d", i)
-    | I (0, x) -> sprintf ("(%s)", opndString (x))
-    | I (n, x) -> sprintf ("%d(%s)", n, opndString (x))
+      R (i) -> regs [i]
+    | S (i) -> sprintf ("-%d(%%ebp)", (i+1) * wordSize)
+    | M (x) -> x
+    | L (i) -> sprintf ("$%d", i)
     esac
   }
   
@@ -84,15 +82,11 @@ fun insnString (insn) {
   | Set   (suf, s)     -> sprintf ("\tset%s\t%s\n", suf, s)
   | IDiv  (s1)         -> sprintf ("\tidivl\t%s\n", opndString (s1))
   | Binop (op, s1, s2) -> sprintf ("\t%s\t%s,\t%s\n", binopString (op), opndString (s1), opndString (s2))
-  | Lea   (s1, s2)     -> sprintf ("\tleal\t%s,\t%s\n", opndString (s1), opndString (s2))
   | Mov   (s1, s2)     -> sprintf ("\tmovl\t%s,\t%s\n", opndString (s1), opndString (s2))
   | Push  (s)          -> sprintf ("\tpushl\t%s\n", opndString (s))
   | Pop   (s)          -> sprintf ("\tpopl\t%s\n", opndString (s))
   | Ret                -> "\tret\n"
   | Call  (p)          -> sprintf ("\tcall\t%s\n", p)
-  | Label (l)          -> sprintf ("%s:\n", l)
-  | Jmp   (l)          -> sprintf ("\tjmp\t%s\n", l)
-  | CJmp  (c, l)       -> sprintf ("\tj%s\t%s\n", c, l)
   | Meta  (m)          -> m
   esac
 }
@@ -102,10 +96,8 @@ fun insnString (insn) {
 --    a symbolic stack
 --    a maximal stack depth reached so far
 --    a set of global variable names
---    a barrier condition (set up right after an unconditional jump is interpreter)
---    a stack map which maps labels to symbolic stacks
 
-fun makeEnv (stack, stackSlots, globals, barrier, stackMap) {
+fun makeEnv (stack, stackSlots, globals) {
   -- Returns an internal name for a global variable
   fun globalName (name) {
     "global_" ++ name
@@ -127,19 +119,19 @@ fun makeEnv (stack, stackSlots, globals, barrier, stackMap) {
       | R (n) : _ -> if n < nRegs then [R (n+1), stackSlots] else [S (0), 1] fi
       | _         -> [S (0), 1]
       esac
-    of [x, n] -> [x, makeEnv (x : stack, if n > stackSlots then n else stackSlots fi, globals, barrier, stackMap)]esac
+    of [x, n] -> [x, makeEnv (x : stack, if n > stackSlots then n else stackSlots fi, globals)]esac
   }
 
   -- Pushes an item on the symbolic state; returns an updated envirtonment
   fun push (y) {
-    makeEnv (y : stack, stackSlots, globals, barrier, stackMap)
+    makeEnv (y : stack, stackSlots, globals)
   }
 
   -- Pops one item from the symbolic stack; returns a pair: a popped
   -- item and an updated environment
   fun pop () {
     case stack of
-      x : stack -> [x, makeEnv (stack, stackSlots, globals, barrier, stackMap)]
+      x : stack -> [x, makeEnv (stack, stackSlots, globals)]
     esac
   }
 
@@ -147,7 +139,7 @@ fun makeEnv (stack, stackSlots, globals, barrier, stackMap) {
   -- popped items and an undated environment
   fun pop2 () {
     case stack of
-      x : y : stack -> [x, y, makeEnv (stack, stackSlots, globals, barrier, stackMap)]
+      x : y : stack -> [x, y, makeEnv (stack, stackSlots, globals)]
     esac
   }
 
@@ -155,10 +147,10 @@ fun makeEnv (stack, stackSlots, globals, barrier, stackMap) {
   fun peek () {
     stack.fst
   }
-  
+
   -- Adds a global variable; returns an updated environment
   fun addGlobal (name) {
-    makeEnv (stack, stackSlots, addSet (globals, globalName (name)), barrier, stackMap)
+    makeEnv (stack, stackSlots, addSet (globals, globalName (name)))
   }
 
   -- References a global variable
@@ -313,7 +305,7 @@ fun stackOpnd (opnd) {
   case opnd of
     S (_) -> true
   | _     -> false
-  esac      
+  esac
 }
 
 -- Checks if an operand resides in memory
@@ -350,30 +342,69 @@ fun suffix (op) {
 -- Compiles stack machine code into a list of x86 instructions. Takes an environment
 -- and stack machine code, returns an updated environment and x86 code.
 fun compile (env, code) {
-  fun compile (env, code) {
-    foldl (
-      fun ([env, scode], i) {
-        var code = scode <+ Meta ("# " ++ showSMInsn (i) ++ "\n");
-        case i of
-          READ ->
-            case env.allocate of
-              [s, env] -> [env, code <+ Call ("Lread") <+ Mov (eax, s)]
-            esac             
-        | WRITE ->
-            case env.pop of
-              [s, env] -> [env, code <+ Push (s) <+ Call ("Lwrite") <+ Pop (eax)]
-            esac
-        | _ -> failure ("codegeneration for instruction %s is not yet implemented\n", i.string)
-        esac
-      }, [env, emptyBuffer ()], code)
-  }
-
-  compile (env, code) 
+  foldl (
+    fun ([env, scode], i) {
+      var code = scode <+ Meta ("# " ++ showSMInsn (i) ++ "\n");
+      case i of
+        READ ->
+          case env.allocate of
+            [s, env] -> [env, code <+ Call ("Lread") <+ Mov (eax, s)]
+          esac
+      | WRITE ->
+          case env.pop of
+            [s, env] -> [env, code <+ Push (s) <+ Call ("Lwrite") <+ Pop (eax)]
+          esac
+      | ST (x) ->
+          case env.pop of
+            [s, env] -> (
+                var newEnv = env.addGlobal(x);
+                [newEnv, code <+ Mov (s, newEnv.loc(x))]
+            )
+          esac
+      | LD (x) ->
+          case env.allocate of
+            [s, env] -> [env, code <+ Mov (env.loc(x), s)]
+          esac
+      | CONST (n) ->
+          case env.allocate of
+            [s, env] -> [env, code <+ Mov (L(n), s)]
+          esac
+      | BINOP (binop) ->
+          case env.pop2 of
+            [y, x, env] -> (
+                [env.push(x),
+                    code <+>
+                    if compare(binop, "+") == 0 !! compare(binop, "-") == 0 !! compare(binop, "*") == 0 then
+                         if memOpnd(x)
+                         then singletonBuffer(Mov (x, eax)) <+ Binop (binop, y, eax) <+ Mov (eax, x)
+                         else singletonBuffer(Binop (binop, y, x))
+                         fi
+                    elif compare(binop, "/") == 0 !! compare(binop, "%") == 0 then
+                         singletonBuffer(Mov (x, eax)) <+ Cltd <+ IDiv(y) <+ Mov (if compare(binop, "/") == 0 then eax else edx fi, x)
+                    elif compare(binop, "<") == 0 !! compare(binop, ">") == 0 !!
+                         compare(binop, "<=") == 0 !! compare(binop, ">=") == 0 !!
+                         compare(binop, "==") == 0 !! compare(binop, "!=") == 0 then
+                         singletonBuffer(Binop ("^", eax, eax)) <+>
+                         if memOpnd(x)
+                         then singletonBuffer(Mov (x, edx)) <+ Binop ("cmp", y, edx)
+                         else singletonBuffer(Binop ("cmp", y, x))
+                         fi <+ Set (suffix(binop), "%al") <+ Mov (eax, x)
+                    elif compare(binop, "!!") == 0 !! compare(binop, "&&") == 0 then
+                         singletonBuffer(Mov (x, eax)) <+ Binop ("cmp", L(0), eax) <+ Binop ("^", eax, eax) <+ Set ("ne", "%al") <+
+                         Mov (y, edx) <+ Binop ("cmp", L(0), edx) <+ Binop ("^", edx, edx) <+ Set ("ne", "%dl") <+
+                         Binop (binop, edx, eax) <+ Mov (eax, x)
+                    else failure ("codegeneration for instruction %s is not yet implemented\n", binop)
+                    fi
+                ]
+            )
+          esac
+      esac
+    }, [env, emptyBuffer ()], code)
 }
 
--- A top-level codegeneration function. Takes a driver's environment and a stack machine program,
--- compiles the program into machine code, and compiles the machine code into an executable
-public fun compileX86 (args, code) {
+-- A top-level codegeneration function. Takes a stack machine program
+-- and returns x86 listing as a string
+public fun compileX86 (code) {
   case compile (initEnv (), code) of
     [env, code] ->
        var asmFile = args.getBaseName ++ ".s",
@@ -381,9 +412,9 @@ public fun compileX86 (args, code) {
                        #val -> "../runtime/"
                      | path -> path
                      esac ++ "/runtime.o";
-       
+
        fwrite (asmFile,
-               map (insnString, 
+               map (insnString,
                     getBuffer $
                       singletonBuffer (Meta ("\t.global\tmain\n")) <+>
                       dataSection (listBuffer $ map (dataDef, getGlobals (env))) <+>
@@ -394,7 +425,7 @@ public fun compileX86 (args, code) {
                         epilogue ()
                       )
                    ).stringcat);
-                    
+
        system ({"gcc -g -m32 -o ", args.getBaseName, " ", runtime, " ", asmFile}.stringcat)
   esac
 }
