@@ -52,10 +52,45 @@ fun fromLabel (env, lab) {
   env [0] (lab)
 }
 
--- Stack machine interpreter. Takes an environment, an SM-configuration and a program,
+-- Evaluate binop. Takes string representation of the binop and operands.
+fun evalBinop(binop, l, r) {
+  case binop of
+    "+" -> l + r
+  | "-" -> l - r
+  | "*" -> l * r
+  | "/" -> l / r
+  | "%" -> l % r
+  | "<" -> l < r
+  | ">" -> l > r
+  | "<=" -> l <= r
+  | ">=" -> l >= r
+  | "==" -> l == r
+  | "!=" -> l != r
+  | "&&" -> l && r
+  | "!!" -> l !! r
+  esac
+}
+
+-- Evaluate a single instruction in the SM-configuration given.
+-- Returns resulting configuration.
+fun evalSMSingle([stack, state, w], i) {
+  case i of
+    READ      -> case readWorld(w) of [v, w] -> [v : stack, state, w] esac
+  | WRITE     -> case stack of v : stack -> [stack, state, writeWorld(v, w)] esac
+  | BINOP (s) -> case stack of r : l : stack -> [evalBinop(s, l, r) : stack, state, w] esac
+  | LD    (x) -> [state(x) : stack, state, w]
+  | ST    (x) -> case stack of v : stack -> [stack, state <- [x, v], w] esac
+  | CONST (n) -> [n : stack, state, w]
+  esac
+}
+
+-- Stack machine interpreter. Takes an SM-configuration and a program,
 -- returns a final configuration
 fun eval (env, c, insns) {
-  failure ("SM eval not implemented\n")
+  case insns of
+    {} -> c
+  | ins : insns -> eval(env, evalSMSingle(c, ins), insns)
+  esac
 }
 
 -- Runs a stack machine for a given input and a given program, returns an output
@@ -96,7 +131,11 @@ fun genLabels (env, n) {
 -- Compiles an expression into a stack machine code.
 -- Takes an expression, returns a list of stack machine instructions
 fun compileExpr (expr) {
-  failure ("compileExpr not implemented\n")
+  case expr of
+    Var (v) -> singletonBuffer(LD (v))
+  | Const (num) -> singletonBuffer(CONST (num))
+  | Binop (binop, e1, e2) -> compileExpr(e1) <+> compileExpr(e2) <+ BINOP (binop)
+  esac
 }
 
 -- Compiles a statement into a stack machine code.
