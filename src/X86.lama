@@ -294,9 +294,81 @@ fun compile (env, code) {
           case env.pop of
             [s, env] -> [env, code <+ Push (s) <+ Call ("Lwrite") <+ Pop (eax)]
           esac
+      | CONST (n) ->
+          case env.allocate of
+            [s, env] -> [env, code <+> move (L (n), s)]
+          esac
+      | LD    (x) ->
+          case env.addGlobal (x).allocate of
+            [s, env] -> [env, code <+> move (env.loc (x), s)]
+          esac
+      | ST    (x) ->
+          case env.addGlobal (x).pop of
+            [s, env] -> [env, code <+> move (s, env.loc (x))]
+          esac
+      | BINOP (op) ->
+          case env.pop2 of
+            -- push y here case we want to save a register in case x = S, y = R
+            [x, y, env] -> [env.push (y), code <+> compileBinop (op, y, x)] -- reversing order here
+          esac
       | _ -> failure ("codegeneration for instruction %s is not yet implemented\n", i.string)
-        esac
-    }, [env, emptyBuffer ()], code)}
+      esac
+    }, [env, emptyBuffer ()], code)
+}
+
+
+fun compileBinop (op, x, y) {
+  -- Checks if a source operand is sutable for the Binop instruction
+  fun isBinopString (op) {
+    case op of
+      "+"   -> true
+    | "-"   -> true
+    | "*"   -> true
+    | "^"   -> true
+    | _     -> false
+    esac
+  }
+
+  -- emulate logical and/or with != operator
+  fun log (x, y, op) {
+      emptyBuffer ()               <+
+      Binop ("^", eax, eax)        <+
+      Binop ("cmp", x, eax)        <+
+      Set   (suffix ("!="), "%al") <+
+      Binop ("^", edx, edx)        <+
+      Binop ("cmp", y, edx)        <+
+      Set   (suffix ("!="), "%dl") <+
+      Binop (op, edx, eax)
+  }
+
+  if isBinopString (op) then
+    if memOpnd (x) then
+      emptyBuffer () <+ Mov (x, eax) <+ Binop (op, y, eax) <+ Mov (eax, x)
+    else
+      singletonBuffer (Binop (op, y, x))
+    fi
+  else
+    case op of
+      "/" ->
+        -- Fill edx with the sign of eax (Cltd works with eax); Divide value in edx:eax by y; restore answer (eax)
+        emptyBuffer() <+ Mov (x, eax) <+ Cltd <+ IDiv (y) <+ Mov (eax, x)
+    | "%" ->
+        -- everything's the same, except we're returning edx
+        emptyBuffer() <+ Mov (x, eax) <+ Cltd <+ IDiv (y) <+ Mov (edx, x)
+    | "&&" ->
+        log (x, y, op) <+ Mov (eax, x)
+    | "!!" ->
+        log (x, y, op) <+ Mov (eax, x)
+    | _   ->
+        -- comparison
+        if memOpnd (x) then
+          emptyBuffer () <+ Mov (x, eax) <+ Binop ("cmp", y, eax) <+ Set (suffix (op), "%al") <+ Mov (eax, x)
+        else
+          emptyBuffer () <+ Binop ("cmp", y, x) <+ Set (suffix (op), "%al") <+ Mov (eax, x)
+        fi
+    esac
+  fi
+}
 
 -- A top-level codegeneration function. Takes a driver's environment and a stack machine program,
 -- compiles the program into machine code, and compiles the machine code into an executable
