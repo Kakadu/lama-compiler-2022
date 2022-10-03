@@ -314,16 +314,16 @@ fun compile(env, code) {
                     Mov(if compare(op, "/") == 0 then eax else edx fi, x)
                 elif compare(op, "<") == 0 !! compare(op, ">") == 0 !! compare(op, "<=") == 0 !!
                   compare(op, ">=") == 0 !! compare(op, "==") == 0 !! compare(op, "!=") == 0 then
-                  singletonBuffer(Binop("^", eax, eax)) <+
+                  singletonBuffer(Binop("^", eax, eax)) <+>
                     if memOpnd(x) && memOpnd(y)
-                      then Mov(x, edx) <+ Binop("cmp", y, edx)
-                      else Binop("cmp", y, x)
+                      then singletonBuffer(Mov(x, edx)) <+ Binop("cmp", y, edx)
+                      else singletonBuffer(Binop("cmp", y, x))
                     fi <+ Set(suffix(op), "%al") <+ Mov(eax, x)
                 elif compare(op, "&&") == 0 !! compare(op, "!!") == 0 then
                   emptyBuffer() <+
-                    Mov("x", eax) <+ Binop("cmp", L(0), eax) <+ Binop("^", eax, eax) <+ Set("ne", "%al") <+
-                    Mov("y", edx) <+ Binop("cmp", L(0), edx) <+ Binop("^", edx, edx) <+ Set("ne", "%dl") <+
-                    Binop(if compare(op, "&&") == 0 then "and" else "or" fi, edx, eax) <+ Mov(eax, x)
+                    Mov(x, eax) <+ Binop("&&", eax, eax) <+ Mov(L(0), eax) <+ Set(suffix("!="), "%al") <+
+                    Mov(y, edx) <+ Binop("&&", edx, edx) <+ Mov(L(0), edx) <+ Set(suffix("!="), "%dl") <+
+                    Binop(op, edx, eax) <+ Mov(eax, x)
                 else failure("unknown BINOP: %s\n", op)
               fi
             ]
