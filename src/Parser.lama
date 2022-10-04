@@ -12,13 +12,33 @@ fun inbr (l, p, r) {
   syntax (-l p -r)
 }
 
+fun parserGenerator(l) {
+  case l of
+    {}        -> failure ("Can't generate parsers from empty list of tokens")
+  | x : l -> foldl(fun (acc, op) {acc | s(op)} , s(x), l)
+  esac
+}
+
+fun rule (l) {
+  {[parserGenerator(l), fun (l, op, r) { Binop(op, l, r)}]}
+}
+
 -- Primary expression
 var primary = memo $ eta (decimal @ fun (x) {Const (stringInt (x))} |
                           lident  @ fun (x) {Var (x)} |
                           inbr (s ("("), exp, s (")"))),
-    exp = memo $ eta (failure ("expression parsing not implemented\n"));
+    exp = memo $ eta (primary | expr({[Left, rule({"!!"})],
+                                      [Left, rule({"&&"})],
+                                      [Nona, rule({"==", "!=", "<=", ">=", ">", "<"})],
+                                      [Left, rule({"+", "-"})],
+                                      [Left, rule({"*", "/", "%"})]},
+                                     primary));
 
-var stmt = memo $ eta (failure ("statement parsing not implemented\n"));
+var stmt = memo $ eta syntax (x=lident s[":="] e=exp { Assn (x, e) }
+                            | s1=stmt s[";"] s2=stmt end { Seq (s1, s2) }
+                            | kSkip { Skip }
+                            | kRead x=inbr[s("("), lident, s(")")] { Read(x) }
+                            | kWrite e=inbr[s("("), exp, s(")")] { Write(e) });
    
 
 -- Public top-level parser
