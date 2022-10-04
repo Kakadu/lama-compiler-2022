@@ -287,13 +287,16 @@ fun generateCompCode (l, r, op) {
 
 fun generateLogicalBinopCode (l, r, op) {
   singletonBuffer (Mov (l, edx))
-    <+ Binop ("cmp", edx, L (0))
     <+ Mov (L (0), eax)
-    <+ Set (suffix("=="), "al")
+    <+ Binop ("cmp", edx, eax)
+    <+ Set (suffix("!="), "%al")
+    <+ Push (eax)
     <+ Mov (r, edx)
-    <+ Binop ("cmp", edx, L (0))
+    <+ Mov (L (0), eax)
+    <+ Binop ("cmp", edx, eax)
     <+ Mov (L (0), edx)
-    <+ Set (suffix("=="), "dl")
+    <+ Set (suffix("!="), "%dl")
+    <+ Pop (eax)
     <+ Binop (op, edx, eax)
     <+ Mov (eax, l)
 }
