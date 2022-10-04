@@ -278,8 +278,8 @@ fun getOpType (op) {
     "+"  -> General
   | "-"  -> General
   | "*"  -> General
-  | "&&" -> General
-  | "!!" -> General
+  | "&&" -> Logical
+  | "!!" -> Logical
   | "/"  -> Division
   | "%"  -> Division
   | _    -> Comparison
@@ -287,18 +287,22 @@ fun getOpType (op) {
 }
 
 fun genGeneral (op, l, r) {
-  if memOpnd (r)
-  then singletonBuffer (Mov (r, eax)) <+ Binop (op, l, eax) + Mov (eax, l)
+  if memOpnd (l)
+  then singletonBuffer (Mov (l, eax)) <+ Binop (op, r, eax) <+ Mov (eax, l)
   else singletonBuffer (Binop (op, r, l))
   fi
 }
 
+fun genLogical (op, l, r) {
+  singletonBuffer (Mov (l, eax)) <+ Mov (L (0), edx) <+ Binop ("cmp", eax, edx) <+
+  Mov (L (0), eax) <+ Set ("ne", "%al") <+ Push (eax) <+ Mov (r, eax) <+
+  Binop ("cmp", eax, edx) <+ Mov (L (0), eax) <+ Set ("ne", "%al") <+ Pop (edx) <+
+  Binop (op, edx, eax) <+ Mov (eax, l)
+}
+
 fun genDivision (op, l, r) {
-  singletonBuffer (Mov (l, eax)) <+ Mov (r, edi) <+ Cltd <+ IDiv (edi) <+
-  case op of
-    "/" -> Mov (eax, l)
-  | "%" -> Mov (edx, l)
-  esac
+  singletonBuffer (Mov (l, eax)) <+ Cltd <+ IDiv (r) <+
+  Mov (case op of "/" -> eax | "%" -> edx esac, l)
 }
 
 fun genComparison (op, l, r) {
@@ -309,6 +313,7 @@ fun genComparison (op, l, r) {
 fun genBinOp (op, l, r) {
   case getOpType (op) of
     General    -> genGeneral (op, l, r)
+  | Logical    -> genLogical (op, l, r)
   | Division   -> genDivision (op, l, r)
   | Comparison -> genComparison (op, l, r)
   esac
