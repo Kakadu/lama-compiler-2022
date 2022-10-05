@@ -361,11 +361,12 @@ fun compileBinop (op, x, y) {
         log (x, y, op) <+ Mov (eax, x)
     | _   ->
         -- comparison
-        if memOpnd (x) then
-          emptyBuffer () <+ Mov (x, eax) <+ Binop ("cmp", y, eax) <+ Set (suffix (op), "%al") <+ Mov (eax, x)
-        else
-          emptyBuffer () <+ Binop ("cmp", y, x) <+ Set (suffix (op), "%al") <+ Mov (eax, x)
-        fi
+         emptyBuffer() <+
+         Mov (L (0), eax) <+
+         Mov (x, edx) <+
+         Binop ("cmp", y, edx) <+
+         Set (suffix(op), "%al") <+
+         Mov (eax, x)
     esac
   fi
 }
