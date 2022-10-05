@@ -1,3 +1,6 @@
+% !TEX TS-program = pdflatex
+% !TeX spellcheck = en_US
+% !TEX root = 04.tex
 \documentclass{article}
 
 \usepackage{amssymb, amsmath}
@@ -158,7 +161,7 @@ undefined).
 All existing rules have to be rewritten~--- we need to formally add a $\withenv{P}{\dots}$ part everywhere. For the new instructions the rules are given on Fig.~\ref{bs_sm_cc}.
 
 \begin{figure}[t]
-  
+
   \renewcommand{\arraystretch}{2}
 
   \[\trule{\withenv{P}{\trans{c}{p}{c^\prime}}}{\withenv{P}{\trans{c}{[\llang{LABEL $\;l$}]p}{c^\prime}}}\ruleno{Label$_{SM}$}\]
@@ -166,7 +169,7 @@ All existing rules have to be rewritten~--- we need to formally add a $\withenv{
   \[\trule{z\ne 0,\quad\withenv{P}{\trans{\inbr{s,\,\theta}}{P[l]}{c^\prime}}}{\withenv{P}{\trans{\inbr{zs,\,\theta}}{[\llang{CJMP$_{nz}$ $\;l$}]p}{c^\prime}}}\ruleno{CJMP$_{nz}^+$$_{SM}$}\]
   \[\trule{z = 0,\quad\withenv{P}{\trans{\inbr{s,\,\theta}}{p}{c^\prime}}}{\withenv{P}{\trans{\inbr{zs,\,\theta}}{[\llang{CJMP$_{nz}$ $\;l$}]p}{c^\prime}}}\ruleno{CJMP$_{nz}^-$$_{SM}$}\]
   \[\trule{z = 0,\quad\withenv{P}{\trans{\inbr{s,\,\theta}}{P[l]}{c^\prime}}}{\withenv{P}{\trans{\inbr{zs,\,\theta}}{[\llang{CJMP$_z$ $\;l$}]p}{c^\prime}}}\ruleno{CJMP$_{z}^+$$_{SM}$}\]
-  \[\trule{z \ne 0,\quad\withenv{P}{\trans{\inbr{s,\,\theta}}{p}{c^\prime}}}{\withenv{P}{\trans{\inbr{zs,\,\theta}}{[\llang{CJMP$_z$ $\;l$}]p}{c^\prime}}}\ruleno{CJMP$_{z}^-$$_{SM}$}\]  
+  \[\trule{z \ne 0,\quad\withenv{P}{\trans{\inbr{s,\,\theta}}{p}{c^\prime}}}{\withenv{P}{\trans{\inbr{zs,\,\theta}}{[\llang{CJMP$_z$ $\;l$}]p}{c^\prime}}}\ruleno{CJMP$_{z}^-$$_{SM}$}\]
   \caption{Big-step operational semantics for extended stack machine}
   \label{bs_sm_cc}
 \end{figure}
