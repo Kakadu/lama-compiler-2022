@@ -12,13 +12,30 @@ fun inbr (l, p, r) {
   syntax (-l p -r)
 }
 
+fun generateRule (tok) {
+  [s(tok), fun (l, op, r) {Binop(tok, l, r)}]
+}
+
+fun generateRules (associativity, tokensList) {
+  [associativity, map(generateRule, tokensList)]
+}
+
 -- Primary expression
 var primary = memo $ eta (decimal @ fun (x) {Const (stringInt (x))} |
                           lident  @ fun (x) {Var (x)} |
                           inbr (s ("("), exp, s (")"))),
-    exp = memo $ eta (failure ("expression parsing not implemented\n"));
+      exp = memo $ eta (expr({generateRules(Left, {"!!"}),
+                              generateRules(Left, {"&&"}),
+                              generateRules(Nona, {"==", "!=", "<=", ">=", ">", "<"}),
+                              generateRules(Left, {"+", "-"}),
+                              generateRules(Left, {"*", "/", "%"})},
+                             primary) | primary);
 
-var stmt = memo $ eta (failure ("statement parsing not implemented\n"));
+var stmt = memo $ eta syntax (v=lident s[":="] ex=exp               {Assn (v, ex)}   |
+                              st1=stmt s[";"] st2=stmt end          {Seq (st1, st2)} |
+                              kSkip                                 {Skip}           |
+                              kRead v=inbr[s("("), lident, s(")")]  {Read(v)}        |
+                              kWrite ex=inbr[s("("), exp, s(")")]   {Write(ex)});
    
 
 -- Public top-level parser
