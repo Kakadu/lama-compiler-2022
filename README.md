@@ -1,2 +1,3 @@
-# compiler-2020
-A supplementary repository for the course on compilers.
+# compiler-202?
+
+Обогатить язык выражений операторами потока управления (skip, ;, if, for, while do, repeat until), поддержать трансляцию и интерпретацию во всех режимах.
