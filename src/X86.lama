@@ -347,6 +347,62 @@ fun suffix (op) {
   esac
 }
 
+fun compileBinop(op, x, y, env, code, s) {
+  fun movXIfBothOnStack () {
+    if stackOpnd (x) && stackOpnd (y) then
+      code := code <+ Mov (x, edx); edx
+    else
+      x
+    fi
+  }
+
+  fun compileArithmetic (op) {
+    code <+ Binop (op, movXIfBothOnStack (), y) <+> move (y, s)
+  }
+
+  var cmp = "cmp", al = "%al", dl = "%dl";
+  fun zeroReg (r) { Binop ("^", r, r) }
+
+  fun compileComparison (op) {
+    code <+ zeroReg (eax) <+ Binop (cmp, movXIfBothOnStack (), y)
+      <+ Set (suffix (op), al) <+ Mov (eax, s)
+  }
+
+  fun compileDivision () {
+    code <+ Mov (y, eax) <+ Cltd <+ IDiv (x)
+  }
+
+  fun compileLogical (op) {
+    fun reduceVarToBin (r32, r8, variable) {
+      listBuffer ({zeroReg (r32), Binop (cmp, variable, r32), Set (suffix ("ne"), r8)})
+    }
+    code <+> reduceVarToBin (eax, al, x) <+> reduceVarToBin (edx, dl, y)
+      <+ Binop (op, eax, edx) <+ Mov (edx, s)
+  }
+
+  fun compileOp () {
+    case op of
+      "+"  -> compileArithmetic (op)
+    | "-"  -> compileArithmetic (op)
+    | "*"  -> compileArithmetic (op)
+    | "/"  -> compileDivision () <+ Mov (eax, s)
+    | "%"  -> compileDivision () <+ Mov (edx, s)
+    | "&&" -> compileLogical (op)
+    | "^"  -> compileLogical (op)
+    | "!!" -> compileLogical (op)
+    | "<"  -> compileComparison (op)
+    | "<=" -> compileComparison (op)
+    | "==" -> compileComparison (op)
+    | "!=" -> compileComparison (op)
+    | ">=" -> compileComparison (op)
+    | ">"  -> compileComparison (op)
+    | _ -> failure ("Unknown binary operator '%s'!\n", op)
+    esac
+  }
+
+  [env, compileOp ()]
+}
+
 -- Compiles stack machine code into a list of x86 instructions. Takes an environment
 -- and stack machine code, returns an updated environment and x86 code.
 fun compile (env, code) {
@@ -362,6 +418,25 @@ fun compile (env, code) {
         | WRITE ->
             case env.pop of
               [s, env] -> [env, code <+ Push (s) <+ Call ("Lwrite") <+ Pop (eax)]
+            esac
+        | CONST (n) ->
+            case env.allocate of
+              [s, env] -> [env, code <+ Mov (L (n), s)]
+            esac
+        | ST (x) ->
+            case env.addGlobal (x).pop of
+              [s, env] -> [env, code <+> move (s, env.loc (x))]
+            esac
+        | LD (x) ->
+            case env.allocate of
+              [s, env] -> [env, code <+> move (env.loc (x), s)]
+            esac
+        | BINOP (op) ->
+            case env.pop2 of
+              [x, y, env] ->
+                case env.allocate of [s, env] ->
+                  compileBinop (op, x, y, env, code, s)
+                esac
             esac
         | _ -> failure ("codegeneration for instruction %s is not yet implemented\n", i.string)
         esac
