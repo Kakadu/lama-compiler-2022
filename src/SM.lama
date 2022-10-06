@@ -2,6 +2,7 @@
 
 import List;
 import World;
+import Array;
 import State;
 import Expr;
 import Buffer;
@@ -26,8 +27,42 @@ public fun showSM (prg) {
 
 -- Stack machine interpreter. Takes an SM-configuration and a program,
 -- returns a final configuration
+
+fun evalBinop ([x:y:stack, state, world], op) {
+  [evalOp (op, y, x):stack, state, world]
+}
+
+fun evalRead ([stack, state, world]) {
+  var res;
+  res := readWorld(world);
+  [res[0]:stack, state, res[1]]
+}
+
+fun evalWrite([x:stack, state, world]) {
+  [stack, state, writeWorld(x, world)]
+}
+
+fun evalSt([v:stack, state, world], x) {
+  [stack, state <- [x, v], world]
+}
+
+fun evalInstruction(c, instruction) {
+  var stack = c[0];
+  var state = c[1];
+  var world = c[2];
+  case instruction of
+    BINOP (op) -> evalBinop (c, op)
+  | CONST (v) -> [v:stack, state, world]
+  | READ -> evalRead (c)
+  | WRITE -> evalWrite (c)
+  | LD (x) -> [state (x):stack, state, world]
+  | ST (x) -> evalSt (c, x)
+  | _ -> failure("Unknown stack machine instruction")
+  esac
+}
+
 fun eval (c, insns) {
-  failure ("SM eval not implemented\n")
+  foldl (evalInstruction, c, insns)
 }
 
 -- Runs a stack machine for a given input and a given program, returns an output
@@ -36,15 +71,23 @@ public fun evalSM (input, insns) {
 }
 
 -- Compiles an expression into a stack machine code.
--- Takes an expression, returns a list 
--- of stack machine instructions
+-- Takes an expression, returns a list of stack machine instructions
 fun compileExpr (expr) {
-  failure ("compileExpr not implemented\n")
+  case expr of
+    Var (x) -> {LD (x)}
+  | Const (n) -> {CONST (n)}
+  | Binop (op, l, r) -> compileExpr (l) +++ compileExpr (r) +++ {BINOP (op)}
+  esac
 }
 
 -- Compiles a statement into a stack machine code.
 -- Takes a statement, returns a list of stack machine
 -- instructions.
 public fun compileSM (stmt) {
-  failure ("compileSM not implemented\n")
+  case stmt of
+    Assn (v, expr) -> compileExpr (expr) +++ {ST (v)}
+  | Seq (stmt1, stmt2) -> compileSM (stmt1) +++ compileSM (stmt2)
+  | Read (v) -> {READ, ST (v)}
+  | Write (expr) -> compileExpr (expr) +++ {WRITE}
+  esac
 }
