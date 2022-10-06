@@ -11,13 +11,42 @@ fun inbr (l, p, r) {
   syntax (-l p -r)
 }
 
+fun operatorDescriptor (op) {
+  [s (op), fun (l, _, r) { Binop (op, l, r) }]
+}
+
+var operators = {
+  [Left, {operatorDescriptor ("!!")}],
+  [Left, {operatorDescriptor ("&&")}],
+  [Nona, {
+    operatorDescriptor ("<"),
+    operatorDescriptor (">"),
+    operatorDescriptor ("<="),
+    operatorDescriptor (">="),
+    operatorDescriptor ("=="),
+    operatorDescriptor ("!=")
+  }],
+  [Left, {
+    operatorDescriptor ("+"),
+    operatorDescriptor ("-")
+  }],
+  [Left, {
+    operatorDescriptor ("*"),
+    operatorDescriptor ("/"),
+    operatorDescriptor ("%")
+  }]
+};
+
 -- Primary expression
 var primary = memo $ eta syntax (x=decimal {Const (stringInt (x))} |
                                  x=lident  {Var (x)}               |
-                                 inbr[s("("), exp, s(")")]),
-      exp = memo $ eta (failure ("expression parsing not implemented\n"));
+                                 inbr[s ("("), exp, s (")")]),
+      exp = memo $ eta expr (operators, primary) | primary;
 
-var stmt = memo $ eta (failure ("statement parsing not implemented\n"));
+var stmt = memo $ eta syntax (dst_var=lident s[":="] expr=exp {Assn (dst_var, expr)}        |
+                              stmt1=stmt s[";"] stmt2=stmt end {Seq (stmt1, stmt2)}         |
+                              kRead dst_var=inbr[s ("("), lident, s (")")] {Read (dst_var)} |
+                              kWrite expr=inbr[s ("("), exp, s (")")] {Write (expr)});
    
 
 -- Public top-level parser

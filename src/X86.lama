@@ -312,6 +312,7 @@ fun compile (env, code) {
 fun compileBinop (op, dst, src) {
   case operatorType (op) of
     SimpleArithmetic -> compileSimpleArithmetic (op, dst, src)
+  | Logical -> compileLogical (op, dst, src)
   | Div -> compileDivision (dst, src) <+ Mov (eax, dst)
   | Mod -> compileDivision (dst, src) <+ Mov (edx, dst)
   | Cmp -> compileComparison (op, dst, src)
@@ -323,8 +324,8 @@ fun operatorType (op) {
     "+" -> SimpleArithmetic
   | "-" -> SimpleArithmetic
   | "*" -> SimpleArithmetic
-  | "&&" -> SimpleArithmetic
-  | "!!" -> SimpleArithmetic
+  | "&&" -> Logical
+  | "!!" -> Logical
   | "^" -> SimpleArithmetic
   | "/" -> Div
   | "%" -> Mod
@@ -340,15 +341,29 @@ fun compileSimpleArithmetic (op, dst, src) {
   fi
 }
 
+fun compileLogical (op, dst, src) {
+  singletonBuffer (Binop ("^", eax, eax))    <+
+                  Binop ("cmp", eax, src)    <+
+                  Set (suffix ("!="), "%al") <+
+                  Binop ("^", edx, edx)      <+
+                  Binop ("cmp", edx, dst)    <+
+                  Set (suffix ("!="), "%dl") <+
+                  Binop (op, edx, eax)       <+
+                  Mov (eax, dst)
+}
+
 fun compileDivision (dst, src) {
   singletonBuffer (Mov (dst, eax)) <+ Cltd <+ IDiv (src)
 }
 
 fun compileComparison (op, dst, src) {
-  if memOpnd (dst) then
-    singletonBuffer (Mov (dst, eax)) <+ Binop ("cmp", src, eax) <+ Set (suffix(op), "%al")
+  var code;
+  code := singletonBuffer (Binop ("^", eax, eax));
+  if memOpnd (src) then
+    code <+ Mov (dst, edx) <+ Binop ("cmp", src, edx) <+
+            Set (suffix(op), "%al") <+ Mov (eax, dst)
   else
-    singletonBuffer (Binop ("cmp", src, dst)) <+ Set (suffix(op), "%al") <+ Mov (eax, dst)
+    code <+ Binop ("cmp", src, dst) <+ Set (suffix(op), "%al") <+ Mov (eax, dst)
   fi
 }
 

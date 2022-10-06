@@ -19,4 +19,6 @@ expr_tests:
 	make -C deep-expressions
 
 clean:
+	make clean -C expressions
+	make clean -C deep-expressions
 	$(RM) *.s *.i *~ $(LOGS) $(TESTS) *.run
