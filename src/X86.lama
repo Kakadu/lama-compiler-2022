@@ -272,6 +272,51 @@ fun suffix (op) {
   esac
 }
 
+fun compileBinOp(env, code, op, x, y) {
+  fun compileCompare(env, code, s) {
+    if stackOpnd(x) && stackOpnd(y) then
+        [env, code <+ Mov (y, edx) <+  Binop ("^", eax, eax) <+ Binop ("cmp", x, edx) <+ Set(suffix(op), "%al") <+ Mov(eax, s)]
+      else
+        [env, code <+ Binop ("^", eax, eax) <+ Binop ("cmp", x, y) <+ Set(suffix(op), "%al") <+ Mov(eax, s)]
+    fi
+  }
+
+  case env.allocate of
+    [s, env] ->
+      case op of
+          "+" ->
+            if stackOpnd(x) && stackOpnd(y) then
+              [env, code <+ Mov (x, eax) <+ Binop ("+", eax, s)]
+            else
+              [env, code <+ Binop ("+", x, y) <+> move(y, s)]
+            fi
+        | "*" ->
+            if stackOpnd(y) then
+              [env, code <+ Mov (y, eax) <+ Binop ("*", x, eax) <+ Mov (eax, s)]
+            else
+              [env, code <+ Binop ("*", x, y) <+> move(y, s)]
+            fi
+        | "-" ->
+            if stackOpnd(x) && stackOpnd(y) then
+              [env, code <+ Mov (x, eax) <+ Binop ("-", eax, s)]
+            else
+              [env, code <+ Binop ("-", x, y)]
+            fi
+        | "/" ->
+          [env, code <+ Mov (y, eax) <+ Cltd <+ IDiv (x) <+ Mov (eax, s)]
+        | "%" ->
+          [env, code <+ Mov (y, eax) <+ Cltd <+ IDiv (x) <+ Mov (edx, s)]
+        | "<"  -> compileCompare(env, code, s)
+        | ">"  -> compileCompare(env, code, s)
+        | "<=" -> compileCompare(env, code, s)
+        | ">=" -> compileCompare(env, code, s)
+        | "!=" -> compileCompare(env, code, s)
+        | "==" -> compileCompare(env, code, s)
+        | _ -> failure("Operator %s is not yet implemented\n", op.string)
+    esac
+  esac
+}
+
 -- Compiles stack machine code into a list of x86 instructions. Takes an environment
 -- and stack machine code, returns an updated environment and x86 code.
 fun compile (env, code) {
@@ -286,6 +331,22 @@ fun compile (env, code) {
       | WRITE ->
           case env.pop of
             [s, env] -> [env, code <+ Push (s) <+ Call ("Lwrite") <+ Pop (eax)]
+          esac
+      | ST (x) ->
+          case env.addGlobal(x).pop of
+            [elem, env] -> [env, code <+> move (elem, env.loc(x))]
+          esac
+      | LD (x) ->
+          case env.allocate of
+            [s, env] -> [env, code <+> move (env.loc(x), s)]
+          esac
+      | CONST (n) ->
+          case env.allocate of
+            [s, env] -> [env, code <+> move (L (n), s)]
+          esac
+      | BINOP (op) ->
+          case env.pop2 of
+            [x, y, env] -> compileBinOp(env, code, op, x, y)
           esac
       | _ -> failure ("codegeneration for instruction %s is not yet implemented\n", i.string)
       esac
