@@ -19,8 +19,14 @@ import World;
 --        While   (expr, stmt)       |
 --        DoWhile (stmt, expr)
 
-fun eval (c, stmt) {
-  failure ("Stmt eval not implemented\n")
+fun eval (c@[st, w], stmt) {
+  case stmt of
+    Skip -> c
+  | Seq (s1, s2) -> eval(eval(c, s1), s2)
+  | Assn (v, e) -> [st <- [v, evalExpr(st, e)], w]
+  | Read (v) -> case readWorld(w) of [inputV, newW] -> [st <- [v, inputV], newW] esac
+  | Write (e) -> [st, writeWorld(evalExpr(st, e), w)]
+  esac
 }
 
 -- Evaluates a program with a given input and returns an output
