@@ -274,22 +274,55 @@ fun suffix (op) {
 
 -- Compiles stack machine code into a list of x86 instructions. Takes an environment
 -- and stack machine code, returns an updated environment and x86 code.
-fun compile (env, code) {
-  foldl (
+fun compile(env, code) {
+  foldl(
     fun ([env, scode], i) {
-      var code = scode <+ Meta ("# " ++ showSMInsn (i) ++ "\n");
+      var code = scode <+ Meta("# " ++ showSMInsn(i) ++ "\n");
       case i of
-        READ ->
+        READ         ->
           case env.allocate of
-            [s, env] -> [env, code <+ Call ("Lread") <+ Mov (eax, s)]
-          esac             
-      | WRITE ->
-          case env.pop of
-            [s, env] -> [env, code <+ Push (s) <+ Call ("Lwrite") <+ Pop (eax)]
+            [s, env] -> [env, code <+ Call("Lread") <+ Mov(eax, s)]
           esac
-      | _ -> failure ("codegeneration for instruction %s is not yet implemented\n", i.string)
+        | WRITE        ->
+          case env.pop of
+            [s, env] -> [env, code <+ Push(s) <+ Call("Lwrite") <+ Pop(eax)]
+          esac
+        | BINOP(binop) ->
+          case env.pop2 of
+            [expr1, expr2, env] -> (
+              var compiledBinop =
+                case binop of
+                  "+"  -> move(expr2, eax) <+ Binop(binop, expr1, eax) <+> move(eax, expr1)
+                  | "-"  -> move(expr2, eax) <+ Binop(binop, expr1, eax) <+> move(eax, expr1)
+                  | "*"  -> move(expr2, eax) <+ Binop(binop, expr1, eax) <+> move(eax, expr1)
+                  | "/"  -> move(expr2, eax) <+ Cltd <+ IDiv(expr1) <+> move(eax, expr1)
+                  | "%"  -> move(expr2, eax) <+ Cltd <+ IDiv(expr1) <+> move(edx, expr1)
+                  | "<"  -> singletonBuffer(Binop("cmp", expr1, expr2)) <+ Set(suffix(binop), "%al") <+> move(eax, expr1)
+                  | ">"  -> singletonBuffer(Binop("cmp", expr1, expr2)) <+ Set(suffix(binop), "%al") <+> move(eax, expr1)
+                  | "<=" -> singletonBuffer(Binop("cmp", expr1, expr2)) <+ Set(suffix(binop), "%al") <+> move(eax, expr1)
+                  | ">=" -> singletonBuffer(Binop("cmp", expr1, expr2)) <+ Set(suffix(binop), "%al") <+> move(eax, expr1)
+                  | "==" -> singletonBuffer(Binop("cmp", expr1, expr2)) <+ Set(suffix(binop), "%al") <+> move(eax, expr1)
+                  | "!=" -> singletonBuffer(Binop("cmp", expr1, expr2)) <+ Set(suffix(binop), "%al") <+> move(eax, expr1)
+                  | "&&" -> move(expr2, eax) <+ Binop(binop, eax, expr1)
+                  | "!!" -> move(expr2, eax) <+ Binop(binop, eax, expr1)
+                esac;
+              [env.push(expr1), code <+> compiledBinop]
+            )
+          esac
+        | LD(x)        ->
+          case env.addGlobal(x).allocate of
+            [s, env] -> [env, code <+> move(env.loc(x), s)]
+          esac
+        | ST(x)        ->
+          case env.addGlobal(x).pop of
+            [s, env] -> [env, code <+> move(s, env.loc(x))]
+          esac
+        | CONST(n)     ->
+          case env.allocate of
+            [s, env] -> [env, code <+> move(L(n), s)]
+          esac
       esac
-    }, [env, emptyBuffer ()], code)
+    }, [env, emptyBuffer()], code)
 }
 
 -- A top-level codegeneration function. Takes a stack machine program
