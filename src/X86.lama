@@ -281,13 +281,39 @@ fun compile (env, code) {
       case i of
         READ ->
           case env.allocate of
-            [s, env] -> [env, code <+ Call ("Lread") <+ Mov (eax, s)]
+            [s, env] -> [env, code <+ Call ("Lread") <+> move (eax, s)]
           esac             
       | WRITE ->
           case env.pop of
             [s, env] -> [env, code <+ Push (s) <+ Call ("Lwrite") <+ Pop (eax)]
           esac
-      | _ -> failure ("codegeneration for instruction %s is not yet implemented\n", i.string)
+      | BINOP (op) ->
+        case env.pop2 of
+          [s1, s2, env] -> 
+            case env.allocate of
+              [s, env] -> 
+                case op of 
+                  "/" -> [env, code <+> move (s2, eax) <+ Cltd <+ IDiv (s1) <+> move (eax, s)]
+                | "%" -> [env, code <+> move (s2, eax) <+ Cltd <+ IDiv (s1) <+> move (edx, s)]
+                | "+" -> [env, code <+> move (s2, eax) <+ Binop (op, s1, eax) <+> move (eax, s)]
+                | "-" -> [env, code <+> move (s2, eax) <+ Binop (op, s1, eax) <+> move (eax, s)]
+                | "*" -> [env, code <+> move (s2, eax) <+ Binop (op, s1, eax) <+> move (eax, s)]
+                |  _  -> [env, code <+ Binop ("cmp", s1, s2) <+> move (L (0), eax) <+ Set (suffix (op), "%al") <+> move (eax, s)]
+                esac
+            esac
+        esac
+      | LD (x) ->
+        case env.addGlobal(x).allocate of
+          [s, env] -> [env, code <+> move (env.loc (x), s)]
+        esac
+      | ST (x) ->
+        case env.addGlobal(x).pop of
+          [s, env] -> [env, code <+> move (s, env.loc (x))]
+        esac
+      | CONST (n) -> 
+        case env.allocate of
+          [s, env] -> [env, code <+> move (L (n), s)]
+        esac
       esac
     }, [env, emptyBuffer ()], code)
 }
