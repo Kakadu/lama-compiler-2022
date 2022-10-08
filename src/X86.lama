@@ -202,8 +202,8 @@ fun makeEnv (stack, stackSlots, globals, barrier, stackMap, fLabel, nLocals) {
   -- Retrieves a stack for a label
   fun retrieveStack (l) {
     case findMap (stackMap, l) of
-      None         -> makeEnv (stack, stackSlots, globals, false, stackMap, fLabel, nLocals)
-    | Some (stack) -> makeEnv (stack, stackSlots, globals, false, stackMap, fLabel, nLocals)
+      None         -> makeEnv (stack, stackSlots, globals, false, stackMap)
+    | Some (stack) -> makeEnv (stack, stackSlots, globals, false, stackMap)
     esac
   }
 
@@ -404,6 +404,24 @@ fun suffix (op) {
   | "!=" -> "ne"
   | ">=" -> "ge"
   | ">"  -> "g"
+  esac
+}
+
+fun compileBinopX86(x,y,s,op) {
+  case op of 
+      "+" -> move(y, eax) <+ Binop(op, x, eax) <+> move(eax, s)
+    | "-" -> move(y, eax) <+ Binop(op, x, eax) <+> move(eax, s)
+    | "*" -> move(y, eax) <+ Binop(op, x, eax) <+> move(eax, s)
+    | "/" -> move(y, eax) <+ Cltd <+ IDiv(x) <+> move(eax,s)
+    | "%" -> move(y, eax) <+ Cltd <+ IDiv(x) <+> move(edx,s)
+    | "==" -> move(y, eax) <+ Binop("cmp", x, eax)<+> move(L(0), eax) <+ Set(suffix(op), "%al") <+> move(eax,s)
+    | "!=" -> move(y, eax) <+ Binop("cmp", x, eax)<+> move(L(0), eax) <+ Set(suffix(op), "%al") <+> move(eax,s)
+    | "<" -> move(y, eax) <+ Binop("cmp", x, eax)<+> move(L(0), eax) <+ Set(suffix(op), "%al") <+> move(eax,s)
+    | "<=" -> move(y, eax) <+ Binop("cmp", x, eax)<+> move(L(0), eax) <+ Set(suffix(op), "%al") <+> move(eax,s)
+    | ">" -> move(y, eax) <+ Binop("cmp", x, eax)<+> move(L(0), eax) <+ Set(suffix(op), "%al") <+> move(eax,s)
+    | ">=" -> move(y, eax) <+ Binop("cmp", x, eax)<+> move(L(0), eax) <+ Set(suffix(op), "%al") <+> move(eax,s)
+    | "&&" -> emptyBuffer()
+    | "!!" -> emptyBuffer()
   esac
 }
 

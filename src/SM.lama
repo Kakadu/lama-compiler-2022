@@ -313,18 +313,18 @@ fun genLabels (env, n) {
   listArray (inner (env, n))
 }
 
--- Helper function: adds a bunch of arguments
-fun addArgs (env, names) {
-  foldl (fun (env, name) {addArg (env, name)}, env, names)
-}
-
--- Helper function: adds a bunch of locals
-fun addVars (env, names) {
-  foldl (fun (env, name) {addVar (env, name)}, env, names)
-}
-
 -- Compiles an expression into a stack machine code.
--- Takes an expression, returns a list of stack machine
+-- Takes an expression, returns a list of stack machine instructions
+fun compileExpr (expr) {
+  case expr of 
+    Var (v) -> {LD(v)}
+    |Const (c) -> {CONST (c)}
+    |Binop (op,e1,e2)-> compileExpr (e1) +++ compileExpr (e2) +++ {BINOP(op)}
+  esac
+}
+
+-- Compiles a statement into a stack machine code.
+-- Takes a statement, returns a list of stack machine
 -- instructions.
 
 (* Assignment *)
@@ -349,7 +349,17 @@ fun addVars (env, names) {
 --    (use env.addArg).
 
 -- Compiles an expression into a stack machine code.
--- Takes an expression, returns a list of stack machine
+-- Takes an expression, returns a list of stack machine instructions
+fun compileExpr (expr) {
+  case expr of 
+    Var (v) -> {LD(v)}
+    |Const (c) -> {CONST (c)}
+    |Binop (op,e1,e2)-> compileExpr (e1) +++ compileExpr (e2) +++ {BINOP(op)}
+  esac
+}
+
+-- Compiles a statement into a stack machine code.
+-- Takes a statement, returns a list of stack machine
 -- instructions.
 public fun compileSM (stmt) {
   fun label (lab, labUsed) {
