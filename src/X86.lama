@@ -310,13 +310,20 @@ fun compile(env, code) {
             var compiled =
               if
                 op.isOneOf({ "+", "-", "*" }) then
-                  move(x, eax) <+ Binop(op, y, eax) <+> move(eax, y)
+                move(x, eax) <+ Binop(op, y, eax) <+> move(eax, y)
                 elif op.isOneOf({ "/", "%" }) then
                   move(x, eax) <+ Cltd <+ IDiv(y) <+> move(if compare(op, "/") == 0 then eax else edx fi, y)
                 elif op.isOneOf({ "<", ">", "<=", ">=", "==", "!=" }) then
                   singletonBuffer(Binop("cmp", y, x)) <+ Set(suffix(op), "%al") <+> move(eax, y)
                 elif op.isOneOf({ "&&", "!!" }) then
-                  move(x, eax) <+ Binop(op, eax, y)
+                -- && and !! are treated as bitwise
+                -- so put 0 if the x, y is 0 otherwise 1 to registers eax, edx accordingly
+                -- apply bitwise && or !! on them
+                  listBuffer({
+                    move(x, eax), Binop("cmp", L(0), eax), Set(suffix("!="), "%al"),
+                    move(y, edx), Binop("cmp", L(0), edx), Set(suffix("!="), "%dl"),
+                    Binop(op, edx, eax), move(eax, y)
+                  })
                 else
                   failure("unkown binary operator %s\n", op)
               fi
