@@ -272,6 +272,24 @@ fun suffix (op) {
   esac
 }
 
+fun compileBinop (op, e1, e2) {
+  case op of
+      "+"  -> move(e1, eax) <+ Binop(op, e2, eax) <+> move(eax, e2)
+    | "-"  -> move(e1, eax) <+ Binop(op, e2, eax) <+> move(eax, e2)
+    | "*"  -> move(e1, eax) <+ Binop(op, e2, eax) <+> move(eax, e2)
+    | "/"  -> move(e1, eax) <+ Cltd <+ IDiv(e2) <+> move(eax, e2)
+    | "%"  -> move(e1, eax) <+ Cltd <+ IDiv(e2) <+> move(edx, e2)
+    | "<"  -> singletonBuffer(Binop("cmp", e2, e1)) <+ Set(suffix(op), "%al") <+> move(eax, e2)
+    | ">"  -> singletonBuffer(Binop("cmp", e2, e1)) <+ Set(suffix(op), "%al") <+> move(eax, e2)
+    | "<=" -> singletonBuffer(Binop("cmp", e2, e1)) <+ Set(suffix(op), "%al") <+> move(eax, e2)
+    | ">=" -> singletonBuffer(Binop("cmp", e2, e1)) <+ Set(suffix(op), "%al") <+> move(eax, e2)
+    | "==" -> singletonBuffer(Binop("cmp", e2, e1)) <+ Set(suffix(op), "%al") <+> move(eax, e2)
+    | "!=" -> singletonBuffer(Binop("cmp", e2, e1)) <+ Set(suffix(op), "%al") <+> move(eax, e2)
+    | "&&" -> move(e1, eax) <+ Binop(op, eax, e2)
+    | "!!" -> move(e1, eax) <+ Binop(op, eax, e2)
+  esac
+}
+
 -- Compiles stack machine code into a list of x86 instructions. Takes an environment
 -- and stack machine code, returns an updated environment and x86 code.
 fun compile (env, code) {
@@ -291,6 +309,18 @@ fun compile (env, code) {
             case env.allocate of
               [s, env] -> [env, code <+> move (L (n), s)]
             esac
+      | LD(x)     ->
+          case env.addGlobal(x).allocate of
+            [s, env] -> [env, code <+> move(env.loc(x), s)]
+         esac
+      | ST(x)     ->
+          case env.addGlobal(x).pop of
+            [s, env] -> [env, code <+> move(s, env.loc(x))]
+          esac
+      | BINOP(op)    ->
+          case env.pop2 of
+            [expr1, expr2, env] -> [env.push(expr1), code <+> compileBinop(op, expr2, expr1)]
+          esac
       | _ -> failure ("codegeneration for instruction %s is not yet implemented\n", i.string)
       esac
     }, [env, emptyBuffer ()], code)
