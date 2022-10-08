@@ -19,6 +19,10 @@ import World;
 --        While   (expr, stmt)       |
 --        DoWhile (stmt, expr)
 
+fun evalWhile(c@[s, w], e, stmt) {
+  if evalExpr(s, e) then evalWhile(eval(c, stmt), e, stmt) else c fi
+}
+
 fun eval (c@[s, w], stmt) {
   case stmt of
     Assn (variable, e) -> [s <- [variable, evalExpr(s, e)], w]
@@ -26,6 +30,9 @@ fun eval (c@[s, w], stmt) {
   | Skip -> c
   | Read (variable) -> case readWorld(w) of [v, w] -> [s <- [variable, v], w] esac
   | Write (e) -> [s, writeWorld(evalExpr(s, e), w)]
+  | If (e, stmt1, stmt2) -> if evalExpr(s, e) then eval(c, stmt1) else eval(c, stmt2) fi
+  | While (e, stmt1) -> evalWhile(c, e, stmt1)
+  | DoWhile (stmt1, e) -> evalWhile(eval(c, stmt1), e, stmt1)
   esac
 }
 
