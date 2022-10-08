@@ -31,11 +31,23 @@ var primary = memo $ eta (decimal @ fun (x) {Const (stringInt (x))} |
                                         genRule ("%")}]
                               }, primary) | primary);
 
-var stmt = memo $ eta syntax (x=lident s[":="] e=exp {Assn (x, e)}              |
-                              x=stmt s[";"] y=stmt end {Seq (x, y)}             |
-                              kSkip {Skip}                                      |
-                              kRead x=inbr[s ("("), lident, s (")")] {Read (x)} |
-                              kWrite e=inbr[s ("("), exp, s (")")] {Write (e)});
+var elPart = memo $ eta syntax (kElif ex=exp kThen s=stmt el=elPart {If (ex, s, el)} |
+                                kElse s=stmt {s});
+
+-- Statement without ';'
+var stmtSimple = memo $ eta syntax (x=lident s[":="] e=exp {Assn (x, e)}                     |
+                                    kSkip {Skip}                                             |
+                                    kRead x=inbr[s ("("), lident, s (")")] {Read (x)}        |
+                                    kWrite e=inbr[s ("("), exp, s (")")] {Write (e)}         |
+                                    kIf e=exp kThen s=stmt el=elPart kFi {If (e, s, el)}     |
+                                    kIf e=exp kThen s=stmt kFi {If (e, s, Skip)}             |
+                                    kWhile e=exp kDo s=stmt kOd {While (e, s)}               |
+                                    kDo s=stmt kWhile e=exp kOd {DoWhile (s, e)}             |
+                                    kFor s1=stmt s[","] e=exp s[","] s2=stmt kDo s3=stmt kOd
+                                      {Seq (s1, While (e, Seq (s3, s2)))});
+
+var stmt = memo $ eta syntax (stmtSimple                                  |
+                              s1=stmtSimple s[";"] s2=stmt {Seq (s1, s2)});
 
 -- Public top-level parser
 public parse = stmt;
