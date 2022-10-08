@@ -444,6 +444,24 @@ fun suffix (op) {
   esac
 }
 
+fun compileBinopX86(x,y,s,op) {
+  case op of 
+      "+" -> move(y, eax) <+ Binop(op, x, eax) <+> move(eax, s)
+    | "-" -> move(y, eax) <+ Binop(op, x, eax) <+> move(eax, s)
+    | "*" -> move(y, eax) <+ Binop(op, x, eax) <+> move(eax, s)
+    | "/" -> move(y, eax) <+ Cltd <+ IDiv(x) <+> move(eax,s)
+    | "%" -> move(y, eax) <+ Cltd <+ IDiv(x) <+> move(edx,s)
+    | "==" -> move(y, eax) <+ Binop("cmp", x, eax)<+> move(L(0), eax) <+ Set(suffix(op), "%al") <+> move(eax,s)
+    | "!=" -> move(y, eax) <+ Binop("cmp", x, eax)<+> move(L(0), eax) <+ Set(suffix(op), "%al") <+> move(eax,s)
+    | "<" -> move(y, eax) <+ Binop("cmp", x, eax)<+> move(L(0), eax) <+ Set(suffix(op), "%al") <+> move(eax,s)
+    | "<=" -> move(y, eax) <+ Binop("cmp", x, eax)<+> move(L(0), eax) <+ Set(suffix(op), "%al") <+> move(eax,s)
+    | ">" -> move(y, eax) <+ Binop("cmp", x, eax)<+> move(L(0), eax) <+ Set(suffix(op), "%al") <+> move(eax,s)
+    | ">=" -> move(y, eax) <+ Binop("cmp", x, eax)<+> move(L(0), eax) <+ Set(suffix(op), "%al") <+> move(eax,s)
+    | "&&" -> emptyBuffer()
+    | "!!" -> emptyBuffer()
+  esac
+}
+
 -- Compiles stack machine code into a list of x86 instructions. Takes an environment
 -- and stack machine code, returns an updated environment and x86 code.
 fun compile (env, code) {  
