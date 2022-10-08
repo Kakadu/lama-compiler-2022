@@ -297,27 +297,27 @@ fun compile (env, code) {
     fun ([env, scode], i) {
       var code = scode <+ Meta ("# " ++ showSMInsn (i) ++ "\n");
       case i of
-        READ ->
+        READ      ->
           case env.allocate of
             [s, env] -> [env, code <+ Call ("Lread") <+ Mov (eax, s)]
           esac             
-      | WRITE ->
+      | WRITE     ->
           case env.pop of
             [s, env] -> [env, code <+ Push (s) <+ Call ("Lwrite") <+ Pop (eax)]
           esac
       | CONST (n) -> 
-            case env.allocate of
-              [s, env] -> [env, code <+> move (L (n), s)]
-            esac
+          case env.allocate of
+            [s, env] -> [env, code <+> move (L (n), s)]
+          esac
       | LD(x)     ->
           case env.addGlobal(x).allocate of
             [s, env] -> [env, code <+> move(env.loc(x), s)]
-         esac
+          esac
       | ST(x)     ->
           case env.addGlobal(x).pop of
             [s, env] -> [env, code <+> move(s, env.loc(x))]
           esac
-      | BINOP(op)    ->
+      | BINOP(op) ->
           case env.pop2 of
             [expr1, expr2, env] -> [env.push(expr1), code <+> compileBinop(op, expr2, expr1)]
           esac
