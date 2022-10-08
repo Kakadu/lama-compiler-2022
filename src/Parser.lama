@@ -12,14 +12,60 @@ fun inbr (l, p, r) {
   syntax (-l p -r)
 }
 
+fun operatorDescriptor (op) {
+  [s (op), fun (l, _, r) { Binop (op, l, r) }]
+}
+
+var operators = {
+  [Left, {operatorDescriptor ("!!")}],
+  [Left, {operatorDescriptor ("&&")}],
+  [Nona, {
+    operatorDescriptor ("<"),
+    operatorDescriptor (">"),
+    operatorDescriptor ("<="),
+    operatorDescriptor (">="),
+    operatorDescriptor ("=="),
+    operatorDescriptor ("!=")
+  }],
+  [Left, {
+    operatorDescriptor ("+"),
+    operatorDescriptor ("-")
+  }],
+  [Left, {
+    operatorDescriptor ("*"),
+    operatorDescriptor ("/"),
+    operatorDescriptor ("%")
+  }]
+};
+
 -- Primary expression
 var primary = memo $ eta (decimal @ fun (x) {Const (stringInt (x))} |
-                          lident  @ fun (x) {Var (x)} |
+                          lident  @ fun (x) {Var (x)}               |
                           inbr (s ("("), exp, s (")"))),
-    exp = memo $ eta (failure ("expression parsing not implemented\n"));
+    exp = memo $ eta expr (operators, primary) | primary;
 
-var stmt = memo $ eta (failure ("statement parsing not implemented\n"));
-   
+var stmt = memo $ eta syntax (substmt1=substmt {substmt1} |
+                              substmt1=substmt s[";"] stmt2=stmt {Seq (substmt1, stmt2)});
+
+var substmt = memo $ eta syntax (dst_var=lident s[":="] expr1=exp {Assn (dst_var, expr1)}     |
+                                kRead dst_var=inbr[s ("("), lident, s (")")] {Read (dst_var)} |
+                                kWrite expr=inbr[s ("("), exp, s (")")] {Write (expr)}        |
+                                kSkip {Skip}                                                  |
+                                if_stmt=ifStmt {if_stmt}                                      |
+                                for_stmt=forStmt {for_stmt}                                   |
+                                while_stmt=whileDoStmt {while_stmt}                           |
+                                do_while_stmt=doWhileStmt {do_while_stmt});
+
+var whileDoStmt = memo $ eta syntax (kWhile cond_expr=exp kDo body_stmt=stmt kOd {While (cond_expr, body_stmt)});
+
+var doWhileStmt = memo $ eta syntax (kDo body_stmt=stmt kWhile cond=exp kOd {DoWhile (body_stmt, cond)});
+
+var forStmt = memo $ eta syntax (kFor init=stmt s[","] cond=exp s[","] step=stmt kDo body_stmt=stmt kOd {Seq(init, While (cond, Seq (body_stmt, step)))});
+
+var ifStmt = memo $ eta syntax (kIf cond=exp kThen true_stmt=stmt false_stmt=elsePartStmt {If (cond, true_stmt, false_stmt)}),
+    elsePartStmt = memo $ eta syntax (kFi {Skip}                           |
+                                      kElse else_stmt=stmt kFi {else_stmt} |
+                                      kElif cond=exp kThen true_stmt=stmt false_stmt=elsePartStmt {If (cond, true_stmt, false_stmt)});
 
 -- Public top-level parser
 public parse = stmt;

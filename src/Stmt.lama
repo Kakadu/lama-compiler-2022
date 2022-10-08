@@ -19,8 +19,56 @@ import World;
 --        While   (expr, stmt)       |
 --        DoWhile (stmt, expr)
 
+fun evalRead (st, world, v) {
+  var res;
+  res := readWorld (world);
+  [st <- [v, res[0]], res[1]]
+}
+
+fun evalWrite (st, world, expr) {
+  [st, writeWorld (evalExpr (st, expr), world)]
+}
+
+fun evalIf ([st, world], cond, true_stmt, false_stmt) {
+  if evalExpr (st, cond) != 0 then
+    eval ([st, world], true_stmt)
+  else
+    eval ([st, world], false_stmt)
+  fi
+}
+
+fun evalWhile ([st, world], while_stmt, cond, body) {
+  if evalExpr (st, cond) != 0 then
+    eval (eval ([st, world], body), while_stmt)
+  else
+    [st, world]
+  fi
+}
+
+fun evalDoWhile ([st, world], while_stmt, body, cond) {
+  var config;
+  config := eval ([st, world], body);
+  if evalExpr (config[0], cond) != 0 then
+    eval (config, while_stmt)
+  else
+    config
+  fi
+}
+
 fun eval (c, stmt) {
-  failure ("Stmt eval not implemented\n")
+  var st, world;
+  st := c[0];
+  world := c[1];
+  case stmt of
+    Assn (v, expr) -> [st <- [v, evalExpr (st, expr)], world]
+  | Seq (stmt1, stmt2) -> eval (eval (c, stmt1), stmt2)
+  | Skip -> c
+  | Read (v) -> evalRead (st, world, v)
+  | Write (expr) -> evalWrite (st, world, expr)
+  | If (cond, true_stmt, false_stmt) -> evalIf (c, cond, true_stmt, false_stmt)
+  | While (cond, body) -> evalWhile (c, stmt, cond, body)
+  | DoWhile (body, cond) -> evalDoWhile (c, stmt, body, cond)
+  esac
 }
 
 -- Evaluates a program with a given input and returns an output

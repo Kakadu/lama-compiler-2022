@@ -54,9 +54,58 @@ fun fromLabel (env, lab) {
 
 -- Stack machine interpreter. Takes an environment, an SM-configuration and a program,
 -- returns a final configuration
-fun eval (env, c, insns) {
-  failure ("SM eval not implemented\n")
+fun evalNonControlFlowInstruction(c, instruction) {
+  var stack = c[0];
+  var state = c[1];
+  var world = c[2];
+  case instruction of
+    BINOP (op) -> evalBinop (c, op)
+  | CONST (v) -> [v:stack, state, world]
+  | READ -> evalRead (c)
+  | WRITE -> evalWrite (c)
+  | LD (x) -> [state (x):stack, state, world]
+  | ST (x) -> evalSt (c, x)
+  | {} -> c
+  | _ -> failure("Unknown stack machine instruction")
+  esac
 }
+
+fun evalBinop ([x:y:stack, state, world], op) {
+  [evalOp (op, y, x):stack, state, world]
+}
+
+fun evalRead ([stack, state, world]) {
+  var res;
+  res := readWorld(world);
+  [res[0]:stack, state, res[1]]
+}
+
+fun evalWrite([x:stack, state, world]) {
+  [stack, state, writeWorld(x, world)]
+}
+
+fun evalSt([v:stack, state, world], x) {
+  [stack, state <- [x, v], world]
+}
+
+fun eval (env, c@[stack, state, world], insns) {
+  case insns of
+    {} -> c
+  | JMP (lab) : _ -> eval (env, c, fromLabel (env, lab))
+  | LABEL (lab) : other -> eval (env, c, other)
+  | CJMP (cond, lab) : other ->
+      case stack of
+        n : stack ->
+                    if case cond of "z" -> n == 0 | _ -> n != 0 esac then
+                      eval (env, [stack, state, world], fromLabel (env, lab))
+                    else
+                      eval (env, [stack, state, world], other)
+                    fi
+      esac
+  | i : other -> eval (env, evalNonControlFlowInstruction (c, i), other)
+  esac
+}
+
 
 -- Runs a stack machine for a given input and a given program, returns an output
 public fun evalSM (input, insns) {
@@ -96,7 +145,11 @@ fun genLabels (env, n) {
 -- Compiles an expression into a stack machine code.
 -- Takes an expression, returns a list of stack machine instructions
 fun compileExpr (expr) {
-  failure ("compileExpr not implemented\n")
+  case expr of
+    Var (x) -> singletonBuffer (LD (x))
+  | Const (n) -> singletonBuffer (CONST (n))
+  | Binop (op, l, r) -> compileExpr (l) <+> compileExpr (r) <+ BINOP (op)
+  esac
 }
 
 -- Compiles a statement into a stack machine code.
@@ -137,9 +190,52 @@ public fun compileSM (stmt) {
                   esac
              esac
         esac
-    | _              -> failure ("compileSM not implemented\n")
+    | If (cond, true_stmt, false_stmt) ->
+      case env.genLabel of
+        [else_label, env] ->
+          case compile (lab, env, true_stmt) of
+            [_, env, true_stmt_code] ->
+              case compile (lab, env, false_stmt) of
+                [_, env, false_stmt_code] ->
+                  [true, env, compileExpr (cond) <+
+                              CJMP ("z", else_label) <+>
+                              true_stmt_code <+
+                              JMP (lab) <+
+                              LABEL (else_label) <+>
+                              false_stmt_code
+                  ]
+              esac
+          esac
+      esac
+    | While (cond, body) ->
+      case env.genLabels (2) of
+        [body_lab, cond_lab, env] ->
+          case compile (cond_lab, env, body) of
+            [_, env, body_code] ->
+              [false, env, singletonBuffer (JMP (cond_lab)) <+
+                          LABEL (body_lab) <+>
+                          body_code <+
+                          LABEL (cond_lab) <+>
+                          compileExpr (cond) <+
+                          CJMP ("nz", body_lab)
+              ]
+          esac
+      esac
+    | DoWhile (body, cond) ->
+      case env.genLabel of
+        [body_lab, env] ->
+          case compile (lab, env, body) of
+            [_, env, body_code] ->
+              [false, env, singletonBuffer (LABEL (body_lab)) <+>
+                          body_code <+>
+                          compileExpr (cond) <+
+                          CJMP ("nz", body_lab)
+              ]
+          esac
+      esac
+    | _ -> failure ("compileSM not implemented\n")
     esac
-  }  
+  }
 
   case initCompEnv ().genLabel of
     [endLab, env] ->
