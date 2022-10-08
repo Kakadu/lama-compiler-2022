@@ -311,6 +311,12 @@ fun compile (env, code) {
             -- push y here case we want to save a register in case x = S, y = R
             [x, y, env] -> [env.push (y), code <+> compileBinop (op, y, x)] -- reversing order here
           esac
+      | LABEL (l)    -> [env, code <+ Label (l)]
+      | JMP   (l)    -> [env, code <+ Jmp (l)]
+      | CJMP  (c, l) ->
+          case env.pop of
+            [s, env] -> [env, code <+ Binop ("cmp", L (0), s) <+ CJmp (c, l)]
+          esac
       | _ -> failure ("codegeneration for instruction %s is not yet implemented\n", i.string)
       esac
     }, [env, emptyBuffer ()], code)
@@ -361,12 +367,12 @@ fun compileBinop (op, x, y) {
         log (x, y, op) <+ Mov (eax, x)
     | _   ->
         -- comparison
-         emptyBuffer() <+
-         Mov (L (0), eax) <+
-         Mov (x, edx) <+
-         Binop ("cmp", y, edx) <+
-         Set (suffix(op), "%al") <+
-         Mov (eax, x)
+        emptyBuffer() <+
+        Mov (L (0), eax) <+
+        Mov (x, edx) <+
+        Binop ("cmp", y, edx) <+
+        Set (suffix(op), "%al") <+
+        Mov (eax, x)
     esac
   fi
 }

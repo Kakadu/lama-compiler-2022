@@ -54,7 +54,7 @@ fun fromLabel (env, lab) {
 
 -- One stack machine's instruction interpreter. Takes an SM-configuration and an instruction,
 -- returns a final configuration
-fun evalInst (env, c, inst) {
+fun evalInst (c, inst) {
   var stack = c[0], state = c[1], world = c[2];
 
   case inst of
@@ -67,13 +67,43 @@ fun evalInst (env, c, inst) {
   | LD    (x) -> [state (x):stack, state, world]
   | ST    (x) -> case stack of num:tail -> [tail, state <- [x, num], world] esac
   | CONST (n) -> [n:stack, state, world]
+  | LABEL (s) -> c
+  esac
+}
+
+fun evalJMP (l, env, c) {
+  case env.fromLabel (l) of
+    new_insns -> evalListOfInst (env, c, new_insns)
+  esac
+}
+
+-- Checks if we should jump on CJMP inst.
+-- Returns a [bool, configuration with one element popped from the stack]
+fun isJump (c@[stack, state, world], cond)
+{
+  case stack of num:tail ->
+    var new_c = [tail, state, world];
+    case cond of
+      "nz" -> if num then [true,  new_c] else [false, new_c] fi
+    | "z"  -> if num then [false, new_c] else [true,  new_c] fi
+    esac
   esac
 }
 
 fun evalListOfInst (env, c, insns) {
   case insns of
     {} -> c
-  | inst:tail -> evalListOfInst (env, evalInst (env, c, inst), tail)
+  | inst:tail -> case inst of
+                   JMP  (l)       -> l.evalJMP (env, c)
+                 | CJMP (cond, l) -> case isJump (c, cond) of
+                                       [jump, new_c] ->
+                                         if jump then
+                                           l.evalJMP (env, new_c) else
+                                           evalListOfInst (env, new_c, tail)
+                                         fi
+                                     esac
+                 | _              -> evalListOfInst (env, evalInst (c, inst), tail)
+                 esac
   esac
 }
 
@@ -143,6 +173,65 @@ public fun compileSM (stmt) {
     fi
   }
 
+  fun compileDoWhile (loop_stmt, e, env) {
+    case env.genLabels (2) of
+      [loop_lab, loop_stmt_lab, env] ->
+        case compile (loop_stmt_lab, env, loop_stmt) of
+          [labUsed, env, loop_stmt_code] ->
+            [env, singletonBuffer (LABEL (loop_lab)) <+>
+                  loop_stmt_code                     <+>
+                  label (loop_stmt_lab, labUsed)     <+>
+                  compileExpr (e)                    <+
+                  CJMP ("nz", loop_lab)]
+        esac
+    esac
+  }
+
+  -- We don't care if loop_stmt_lab is used by loop_stmt,
+  -- we use it anyway to jump to the expression code
+  fun compileWhile (loop_stmt, e, env) {
+    case env.genLabels (2) of
+      [loop_lab, loop_stmt_lab, env] ->
+        case compile (loop_stmt_lab, env, loop_stmt) of
+          [_, env, loop_stmt_code] ->
+            [env, singletonBuffer (JMP (loop_stmt_lab)) <+
+                  LABEL (loop_lab)                      <+>
+                  loop_stmt_code                        <+
+                  LABEL (loop_stmt_lab)                 <+>
+                  compileExpr (e)                       <+
+                  CJMP ("nz", loop_lab)]
+        esac
+    esac
+  }
+
+  -- compiled e
+  -- jump if not 0 to if_lab
+  -- compiled else_stmt
+  -- else_stmt_lab: (optional)
+  -- jmp to the end (JMP lab)
+  -- if_lab:
+  -- compiled if_stmt
+  -- lab: (ending label)
+  fun compileIf (if_stmt, else_stmt, e, env, lab) {
+    case env.genLabels (2) of
+       [else_stmt_lab, if_lab, env] ->
+         case compile (else_stmt_lab, env, else_stmt) of
+           [labUsed, env, else_stmt_code] ->
+             case compile (lab, env, if_stmt) of
+               [_, env, if_stmt_code] ->
+                 [env, compileExpr (e)                <+
+                       CJMP ("nz", if_lab)            <+>
+                       else_stmt_code                 <+>
+                       label (else_stmt_lab, labUsed) <+
+                       JMP (lab)                      <+
+                       LABEL (if_lab)                 <+>
+                       if_stmt_code                   <+
+                       LABEL (lab)]
+             esac
+          esac
+      esac
+  }
+
   -- Generates SM code for a given statement
   --    lab  --- a label th go to after the statement is executed
   --    env  --- compilation environment
@@ -167,7 +256,16 @@ public fun compileSM (stmt) {
                   esac
              esac
         esac
-    | _              -> failure ("compileSM not implemented\n")
+    | DoWhile (loop_stmt, e)          -> case compileDoWhile (loop_stmt, e, env)
+                                           of [env, code] -> [false, env, code]
+                                         esac
+    | While   (e, loop_stmt)          -> case compileWhile   (loop_stmt, e, env)
+                                           of [env, code] -> [false, env, code]
+                                         esac
+    | If      (e, if_stmt, else_stmt) -> case compileIf      (if_stmt, else_stmt, e, env, lab)
+                                           of [env, code] -> [true, env, code]
+                                         esac
+    | _ -> failure ("compileSM not implemented\n")
     esac
   }  
 

@@ -23,14 +23,25 @@ fun eval (c, stmt) {
   var state = c[0], world = c[1];
 
   case stmt of
-    Assn  (var_as_str, expr)      -> [state <- [var_as_str, evalExpr (state, expr)], world]
-  | Seq   (left_stmt, right_stmt) -> eval (eval (c, left_stmt), right_stmt)
-  | Skip                          -> c
-  | Read  (name_of_var)           ->
-      case readWorld (world) of [num, new_world] ->
+    Assn    (var_as_str, expr)         -> [state <- [var_as_str, evalExpr (state, expr)], world]
+  | Seq     (left_stmt, right_stmt)    -> eval (eval (c, left_stmt), right_stmt)
+  | Skip                               -> c
+  | Read    (name_of_var)              ->
+      case readWorld (world) of
+        [num, new_world] ->
           [state <- [name_of_var, num], new_world]
       esac
-  | Write (expr)                  -> [state, writeWorld (evalExpr (state, expr), world)]
+  | Write   (expr)                     -> [state, writeWorld (evalExpr (state, expr), world)]
+  | DoWhile (loop_stmt, expr)          -> eval (eval (c, loop_stmt), While (expr, loop_stmt))
+  | If      (expr, if_stmt, else_stmt) ->
+      if evalExpr (state, expr) then
+        eval (c, if_stmt) else
+        eval (c, else_stmt)
+      fi
+  | While   (expr, loop_stmt)          ->
+      if evalExpr (state, expr) then
+        eval (eval (c, loop_stmt), stmt) else c
+      fi
   esac
 }
 

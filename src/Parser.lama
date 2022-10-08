@@ -36,11 +36,24 @@ var primary = memo $ eta syntax (x=decimal {Const (stringInt (x))} |
                                  inbr[s("("), exp, s(")")]),
       exp = memo $ eta (expr (ops, primary) | primary);
 
-var stmt = memo $ eta syntax (x=lident s[":="] e=exp {Assn (x, e)}              |
-                              x=stmt s[";"] y=stmt end {Seq (x, y)}             |
-                              kSkip {Skip}                                      |
-                              kRead x=inbr[s ("("), lident, s (")")] {Read (x)} |
-                              kWrite e=inbr[s ("("), exp, s (")")] {Write (e)});
+-- returns sexp If (If...)
+var elif_prs = memo $ eta syntax (kElif e=exp kThen x=stmt y=elif_prs {If (e, x, y)} |
+                                  kElse z=stmt kFi {z}                               |
+                                  kFi {Skip});
+
+var one_stmt_parser = memo $ eta syntax (x=lident s[":="] e=exp {Assn (x, e)}                   |
+                                         kSkip {Skip}                                           |
+                                         kRead x=inbr[s ("("), lident, s (")")] {Read (x)}      |
+                                         kWrite e=inbr[s ("("), exp, s (")")] {Write (e)}       |
+                                         kWhile e=exp kDo x=stmt kOd {While (e, x)}             |
+                                         kDo x=stmt kWhile e=exp kOd {DoWhile (x, e)}           |
+                                         kIf e=exp kThen x=stmt kElse y=stmt kFi {If (e, x, y)} |
+                                         kIf e=exp kThen x=stmt kFi {If (e, x, Skip)}           |
+                                         kIf e=exp kThen x=stmt y=elif_prs {If (e, x, y)}       |
+                                         kFor x=stmt s[","] e=exp s[","] y=stmt kDo loop_stmt=stmt kOd
+                                         {Seq (x, While (e, Seq (loop_stmt, y)))});
+
+var stmt = memo $ eta syntax (one_stmt_parser | x=one_stmt_parser s[";"] y=stmt {Seq (x, y)});
 
 -- Public top-level parser
 public parse = stmt;
