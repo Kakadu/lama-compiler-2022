@@ -286,17 +286,57 @@ fun compile (env, code) {
     fun ([env, scode], i) {
       var code = scode <+ Meta ("# " ++ showSMInsn (i) ++ "\n");
       case i of
-        READ ->
-          case env.allocate of
-            [s, env] -> [env, code <+ Call ("Lread") <+ Mov (eax, s)]
-          esac             
-      | WRITE ->
+          READ ->
+            case env.allocate of
+              [s, env] -> [env, code <+ Call ("Lread") <+ Mov (eax, s)]
+            esac
+        | WRITE ->
           case env.pop of
             [s, env] -> [env, code <+ Push (s) <+ Call ("Lwrite") <+ Pop (eax)]
           esac
-      | _ -> failure ("codegeneration for instruction %s is not yet implemented\n", i.string)
-        esac
-    }, [env, emptyBuffer ()], code)}
+        | CONST (n) ->
+          case env.allocate of
+            [s, env] -> [env, code <+> move (L (n), s)]
+          esac
+        | LD (x) ->
+          case env.addGlobal (x).allocate of
+            [s, env] -> [env, code <+> move (env.loc (x), s)]
+          esac
+        | ST (x) ->
+          case env.addGlobal (x).pop of
+            [s, env] -> [env, code <+> move (s, env.loc (x))]
+          esac
+        | BINOP (op) ->
+          case env.pop2 of
+            [y, x, env] -> [env.push (x), code <+>
+              if compare (op, "+") == 0 !! compare (op, "-") == 0 !! compare (op, "*") == 0 then
+                if memOpnd (x) == false then singletonBuffer (Binop (op, y, x))
+                  elif memOpnd (y) == false && compare (op, "-") != 0 then Binop (op, x, y) <+> move (y, x)
+                  else move (x, eax) <+ Binop (op, y, eax) <+> move (eax, x)
+                fi
+                elif compare (op, "/") == 0 !! compare (op, "%") == 0 then
+                  move (x, eax) <+ Cltd <+ IDiv (y) <+> move (if compare (op, "/") == 0 then eax else edx fi, x)
+                elif compare (op, "<") == 0 !! compare (op, ">") == 0 !!
+                  compare (op, "<=") == 0 !! compare (op, ">=") == 0 !!
+                  compare (op, "==") == 0 !! compare (op, "!=") == 0 then
+                  singletonBuffer (Binop ("^", edx, edx)) <+>
+                    if memOpnd (x) && memOpnd (y) then move (x, eax) <+ Binop ("cmp", y, eax)
+                      else singletonBuffer (Binop ("cmp", y, x)) fi
+                    <+ Set (suffix (op), "%dl") <+> move (edx, x)
+                elif compare (op, "&&") == 0 !! compare (op, "!!") == 0 then
+                  listBuffer ({
+                    Binop ("^", eax, eax), Binop ("cmp", L (0), x), Set (suffix ("!="), "%al"),
+                    Binop ("^", edx, edx), Binop ("cmp", L (0), y), Set (suffix ("!="), "%dl"),
+                    Binop (op, eax, edx)
+                  }) <+> move (edx, x)
+                else failure ("unknown binop %s\n", op)
+              fi
+            ]
+          esac
+        | _ -> failure ("codegeneration for instruction %s is not yet implemented\n", i.string)
+      esac
+    }, [env, emptyBuffer ()], code)
+}
 
 -- A top-level codegeneration function. Takes a driver's environment and a stack machine program,
 -- compiles the program into machine code, and compiles the machine code into an executable
