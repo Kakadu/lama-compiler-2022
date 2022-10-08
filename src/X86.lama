@@ -310,7 +310,7 @@ fun compile(env, code) {
             var compiled =
               if
                 op.isOneOf({ "+", "-", "*" }) then
-                move(x, eax) <+ Binop(op, y, eax) <+> move(eax, y)
+                  move(x, eax) <+ Binop(op, y, eax) <+> move(eax, y)
                 elif op.isOneOf({ "/", "%" }) then
                   move(x, eax) <+ Cltd <+ IDiv(y) <+> move(if compare(op, "/") == 0 then eax else edx fi, y)
                 elif op.isOneOf({ "<", ">", "<=", ">=", "==", "!=" }) then
