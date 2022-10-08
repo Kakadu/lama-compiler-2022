@@ -20,6 +20,17 @@ public fun showSMInsn (i) {
   esac
 }
 
+fun evalSMSingleIns([stack, state, w], i) {
+  case i of
+    READ      -> case readWorld(w) of [v, w] -> [v : stack, state, w] esac
+  | WRITE     -> case stack of v : stack -> [stack, state, writeWorld(v, w)] esac
+  | BINOP (s) -> case stack of r : l : stack -> [evalBinop(s, l, r) : stack, state, w] esac
+  | LD    (x) -> [state(x) : stack, state, w]
+  | ST    (x) -> case stack of v : stack -> [stack, state <- [x, v], w] esac
+  | CONST (n) -> [n : stack, state, w]
+  esac
+}
+
 public fun showSM (prg) {
   map (fun (i) {showSMInsn (i) ++ "\n"}, prg).stringcat
 }
@@ -27,7 +38,10 @@ public fun showSM (prg) {
 -- Stack machine interpreter. Takes an SM-configuration and a program,
 -- returns a final configuration
 fun eval (c, insns) {
-  failure ("SM eval not implemented\n")
+  case insns of
+    {} -> c
+  | ins : insns -> eval(evalSMSingleIns(c, ins), insns)
+  esac
 }
 
 -- Runs a stack machine for a given input and a given program, returns an output
@@ -38,12 +52,22 @@ public fun evalSM (input, insns) {
 -- Compiles an expression into a stack machine code.
 -- Takes an expression, returns a list of stack machine instructions
 fun compileExpr (expr) {
-  failure ("compileExpr not implemented\n")
+   case expr of
+    Var (v)           -> {LD (v)}
+  | Const (c)         -> {CONST (c)}
+  | Binop (b, exp1, exp2) -> compileExpr(exp1) +++ compileExpr(exp2) +++ {BINOP (b)}
+  esac
 }
 
 -- Compiles a statement into a stack machine code.
 -- Takes a statement, returns a list of stack machine
 -- instructions.
 public fun compileSM (stmt) {
-  failure ("compileSM not implemented\n")
+case stmt of
+    Assn (v, e)   -> compileExpr(e) +++ {ST (v)}
+  | Seq (seq1, seq2)  -> compileSM(seq1) +++ compileSM(seq2)
+  | Skip          -> {}
+  | Read (v)      -> {READ, ST (v)}
+  | Write (e)     -> compileExpr(e) +++ {WRITE}
+  esac
 }
