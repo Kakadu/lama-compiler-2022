@@ -11,7 +11,7 @@ check: $(TESTS)
 $(TESTS): %: %.lama
 	@echo $@
 	cpp -P -D PROGRAM_BODY="`tr -d '\n' < $<`" Embedding.meta > tmp.lama
-	$(LAMAC) -I ../src -o $@ tmp.lama
+	$(LAMAC) -I ../src -o $@ tmp.lama -ds
 	$(RM) tmp.lama
 	cat $@.input | ./$@ -i > $@.log && diff $@.log orig/$@.log
 	cat $@.input | ./$@ -s > $@.log && diff $@.log orig/$@.log
