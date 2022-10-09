@@ -3,21 +3,21 @@
 import List;
 import State;
 
-fun evalBinop (op, x, y)
+fun evalBinop(op, x, y)
 {
   case op of
-    "+"     -> x + y
-    | "-"   -> x - y
-    | "*"   -> x * y
-    | "/"   -> x / y
-    | "%"   -> x % y
-    | "<"   -> x < y
-    | "<="  -> x <= y
-    | ">"   -> x > y
-    | ">="  -> x >= y
-    | "=="  -> x == y
-    | "!="  -> x != y
-    | _     -> failure ("Unexpected binary operator <%s>\n", op.string)
+    "+"    -> x + y
+    | "-"  -> x - y
+    | "*"  -> x * y
+    | "/"  -> x / y
+    | "%"  -> x % y
+    | "<"  -> x < y
+    | "<=" -> x <= y
+    | ">"  -> x > y
+    | ">=" -> x >= y
+    | "==" -> x == y
+    | "!=" -> x != y
+    | _    -> failure("Unexpected binary operator <%s>\n", op.string)
   esac
 }
 
@@ -30,12 +30,12 @@ fun evalBinop (op, x, y)
 --        Const (int)                |
 --        Binop (string, expr, expr)
 
-public fun evalExpr (st, expr)
+public fun evalExpr(st, expr)
 {
   case expr of
-    Var (x)             -> st (x)
-    | Const (n)         -> n
-    | Binop (op, x, y)  -> evalBinop (op, evalExpr (st, x), evalExpr (st, y))
-    | _                 -> failure ("Unexpected expression <%s>\n", expr.string)
+    Var (x)            -> st(x)
+    | Const (n)        -> n
+    | Binop (op, x, y) -> evalBinop(op, evalExpr(st, x), evalExpr(st, y))
+    | _                -> failure("Unexpected expression <%s>\n", expr.string)
   esac
 }
