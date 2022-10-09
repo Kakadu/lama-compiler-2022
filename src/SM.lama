@@ -9,7 +9,8 @@ import Fun;
 
 -- Stack code printer. Takes a list of SM instructions, return its
 -- string representation.
-public fun showSMInsn (i) {
+public fun showSMInsn (i)
+{
   case i of
     READ      -> sprintf ("READ")
   | WRITE     -> sprintf ("WRITE")
@@ -17,33 +18,75 @@ public fun showSMInsn (i) {
   | LD    (x) -> sprintf ("LD %s", x)
   | ST    (x) -> sprintf ("ST %s", x)
   | CONST (n) -> sprintf ("CONST %d", n)
+  | _         -> sprintf ("Unexpected SM instruction <%s>", i.string)
   esac
 }
 
-public fun showSM (prg) {
+public fun showSM (prg)
+{
   map (fun (i) {showSMInsn (i) ++ "\n"}, prg).stringcat
 }
 
 -- Stack machine interpreter. Takes an SM-configuration and a program,
 -- returns a final configuration
-fun eval (c, insns) {
-  failure ("SM eval not implemented\n")
+fun eval (c, insns)
+{
+  fun helper (c @ [st, s, w], ins)
+  {
+    case ins of
+      READ          -> 
+        case readWorld (w) of
+          [n, w] -> [n : st, s, w]
+        esac
+      | WRITE       -> 
+        case st of
+          n : tl -> [tl, s, writeWorld (n, w)]
+        esac
+      | CONST (n)   -> [n : st, s, w]
+      | BINOP (op)  ->
+        case st of
+          x : y : tl -> [evalExpr (s, Binop (op, Const (y), Const (x))) : tl, s, w]
+        esac
+      | LD (x)      -> [s(x) : st, s, w]
+      | ST (x)      ->
+        case st of
+          n : tl -> [tl, s <- [x, n], w]
+        esac
+      | _           -> failure ("Unexpected SM instruction <%s>", ins.string)
+    esac
+  }
+  foldl (helper, c, insns)
 }
 
 -- Runs a stack machine for a given input and a given program, returns an output
-public fun evalSM (input, insns) {
+public fun evalSM (input, insns)
+{
   eval ([{}, emptyState, createWorld (input)], insns)[2].getOutput
 }
 
 -- Compiles an expression into a stack machine code.
 -- Takes an expression, returns a list of stack machine instructions
-fun compileExpr (expr) {
-  failure ("compileExpr not implemented\n")
+fun compileExpr (expr)
+{
+  case expr of
+    Var (x)             -> { LD (x) }
+    | Const (n)         -> { CONST (n) }
+    | Binop (op, x, y)  -> compileExpr (x) +++ compileExpr (y) +++ { BINOP (op) }
+    | _                 -> failure ("Unexpected expression <%s>\n", expr.string)
+  esac
 }
 
 -- Compiles a statement into a stack machine code.
 -- Takes a statement, returns a list of stack machine
 -- instructions.
-public fun compileSM (stmt) {
-  failure ("compileSM not implemented\n")
+public fun compileSM (stmt)
+{
+  case stmt of
+    Skip            -> { }
+    | Read (x)      -> { READ, ST (x) }
+    | Write (e)     -> compileExpr (e) +++ { WRITE } 
+    | Assn (x, e)   -> compileExpr (e) +++ { ST (x) }
+    | Seq (s1, s2)  -> compileSM (s1) +++ compileSM (s2)
+    | _             -> failure ("Unexpected statement <%s>\n", stmt.string)
+  esac
 }

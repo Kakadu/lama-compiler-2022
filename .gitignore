@@ -1,2 +1,7 @@
+# lama files
+*.o
 *.i
 *.s
+
+#tests
+regression/
