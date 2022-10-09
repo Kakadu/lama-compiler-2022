@@ -1,3 +1,5 @@
-# compiler-202?
+# compiler-202x
 
-Обогатить язык выражений операторами потока управления (skip, ;, if, for, while do, repeat until), поддержать трансляцию и интерпретацию во всех режимах.
+A supplementary repository for the course on compilers.
+
+Обогатить язык выражений операторами потока управления (skip, ;, if, for, while do, do while), поддержать трансляцию и интерпретацию во всех режимах.
