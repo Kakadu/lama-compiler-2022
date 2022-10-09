@@ -299,7 +299,7 @@ fun compileBinop (op, l, r) {
         fi
   }
 
-  -- Performs int comparison.
+  -- Performs int comparison and stores result in r.
   fun cmpBinop (op, l, r) {
     singletonBuffer (Binop ("^", eax, eax))
     <+> if bothInMem then
@@ -310,7 +310,6 @@ fun compileBinop (op, l, r) {
     <+ Set (suffix (op), "%al")
     <+ Mov (eax, r)
   }
-
 
   case op of
       "+"  -> memRegBinop (op, l, r)
@@ -324,8 +323,7 @@ fun compileBinop (op, l, r) {
     | ">=" -> cmpBinop (op, l, r)
     | "==" -> cmpBinop (op, l, r)
     | "!=" -> cmpBinop (op, l, r)
-  --  | "&&" -> logicBinop (op, l, r)
-  --  | "!!" -> logicBinop (op, l, r)
+    | _ -> failure ("Unsupported operation %s", op)
   esac
 }
 
