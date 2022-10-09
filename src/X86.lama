@@ -272,25 +272,25 @@ fun suffix (op) {
   esac
 }
 
-fun operationType (operation) {
-  case operation of
-      "+"  -> Base
-    | "-"  -> Base
-    | "*"  -> Base
-    | "&&" -> Logical
-    | "!!" -> Logical
-    | "/"  -> Division
-    | "%"  -> Remainder
-    | "<"  -> Compare
-    | "<=" -> Compare
-    | "!=" -> Compare
-    | ">=" -> Compare
-    | ">"  -> Compare
-    | "==" -> Compare
-  esac
-}
-
 fun binop (left, right, operation) {
+  fun operationType (operation) {
+    case operation of
+        "+"  -> Base
+      | "-"  -> Base
+      | "*"  -> Base
+      | "&&" -> Logical
+      | "!!" -> Logical
+      | "/"  -> Division
+      | "%"  -> Remainder
+      | "<"  -> Compare
+      | "<=" -> Compare
+      | "!=" -> Compare
+      | ">=" -> Compare
+      | ">"  -> Compare
+      | "==" -> Compare
+    esac
+  }
+  
   case operationType(operation) of
       Base ->
         if memOpnd(left) then
@@ -338,9 +338,9 @@ fun compile (env, code) {
           case env.addGlobal(x).pop of
             [s, env] -> [env, code <+> move (s, env.loc(x))]
           esac
-      | BINOP (op) ->
+      | BINOP (operation) ->
           case env.pop2 of
-            [r, l, env] -> [env.push(l), code <+> binop(l, r, op)]
+            [right, left, env] -> [env.push(left), code <+> binop(left, right, operation)]
           esac
       | _ -> failure ("codegeneration for instruction %s is not yet implemented\n", i.string)
       esac

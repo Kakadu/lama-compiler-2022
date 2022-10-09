@@ -50,17 +50,17 @@ fun evalSingleInstruction ([stack, state, world], insn) {
 
 -- Runs a stack machine for a given input and a given program, returns an output
 public fun evalSM (input, insns) {
-  eval ([{}, emptyState, createWorld (input)], getBuffer(insns))[2].getOutput
+  eval ([{}, emptyState, createWorld (input)], insns)[2].getOutput
 }
 
 -- Compiles an expression into a stack machine code.
 -- Takes an expression, returns a list of stack machine instructions
 fun compileExpr (expr) {
   case expr of
-    Var (x) -> singletonBuffer(LD (x))
-  | Const (n) -> singletonBuffer(CONST (n))
+    Var (x) -> { LD (x) }
+  | Const (n) -> { CONST (n) }
   | Binop (operation, leftExpr, rightExpr)
-      -> compileExpr (leftExpr) <+> compileExpr (rightExpr) <+> singletonBuffer(BINOP (operation))
+      -> compileExpr (leftExpr) +++ compileExpr (rightExpr) +++ { BINOP (operation) }
   esac
 }
 
@@ -69,10 +69,10 @@ fun compileExpr (expr) {
 -- instructions.
 public fun compileSM (stmt) {
   case stmt of
-    Assn (x, expr) -> compileExpr (expr) <+> singletonBuffer(ST (x))
-  | Seq (stmt1, stmt2) -> compileSM (stmt1) <+> compileSM (stmt2)
-  | Read (x) -> singletonBuffer(READ) <+> singletonBuffer(ST (x))
-  | Skip -> emptyBuffer()
-  | Write (expr) -> compileExpr (expr) <+> singletonBuffer(WRITE)
+    Assn (x, expr) -> compileExpr (expr) +++ { ST (x) }
+  | Seq (stmt1, stmt2) -> compileSM (stmt1) +++ compileSM (stmt2)
+  | Read (x) -> { READ } +++ { ST (x) }
+  | Skip -> {}
+  | Write (expr) -> compileExpr (expr) +++ { WRITE }
   esac
 }
