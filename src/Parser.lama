@@ -24,18 +24,34 @@ fun generateRules (associativity, tokensList) {
 var primary = memo $ eta (decimal @ fun (x) {Const (stringInt (x))} |
                           lident  @ fun (x) {Var (x)} |
                           inbr (s ("("), exp, s (")"))),
-      exp = memo $ eta (expr({generateRules(Left, {"!!"}),
-                              generateRules(Left, {"&&"}),
-                              generateRules(Nona, {"==", "!=", "<=", ">=", ">", "<"}),
-                              generateRules(Left, {"+", "-"}),
-                              generateRules(Left, {"*", "/", "%"})},
-                             primary) | primary);
+    exp = memo $ eta (expr({generateRules(Left, {"!!"}),
+                            generateRules(Left, {"&&"}),
+                            generateRules(Nona, {"==", "!=", "<=", ">=", ">", "<"}),
+                            generateRules(Left, {"+", "-"}),
+                            generateRules(Left, {"*", "/", "%"})},
+                           primary) | primary),
+    ifp = memo $ eta syntax (
+      kIf cond=exp kThen sTrue=stmt kFi                     {If(cond, sTrue, Skip)}   |
+      kIf cond=exp kThen sTrue=stmt kElse sFalse=stmt kFi   {If(cond, sTrue, sFalse)} |
+      kIf cond=exp kThen sTrue=stmt rest=elifsp             {If(cond, sTrue, rest)}),
+    elifsp = memo $ eta syntax (
+      kElif cond=exp kThen sTrue=stmt rest=elifsp           {If(cond, sTrue, rest)}   |
+      kElif cond=exp kThen sTrue=stmt kElse sFalse=stmt kFi {If(cond, sTrue, sFalse)} |
+      kElif cond=exp kThen sTrue=stmt kFi                   {If(cond, sTrue, Skip)}),
+    whilep = memo $ eta syntax (
+      kWhile cond=exp kDo body=stmt kOd                     {While(cond, body)}),
+    dowhilep = memo $ eta syntax (
+      kDo body=stmt kWhile cond=exp kOd                     {DoWhile(body, cond)}),
+    forp = memo $ eta syntax (
+      kFor init=stmt s[","] cond=exp s[","] iter=stmt kDo body=stmt kOd
+                                                            {Seq(init, While(cond, Seq(body, iter)))});
 
-var stmt = memo $ eta syntax (v=lident s[":="] ex=exp               {Assn (v, ex)}   |
-                              st1=stmt s[";"] st2=stmt end          {Seq (st1, st2)} |
-                              kSkip                                 {Skip}           |
-                              kRead v=inbr[s("("), lident, s(")")]  {Read(v)}        |
-                              kWrite ex=inbr[s("("), exp, s(")")]   {Write(ex)});
+var simpleStmt = memo $ eta syntax (v=lident s[":="] ex=exp               {Assn (v, ex)}   |
+                                    kSkip                                 {Skip}           |
+                                    kRead v=inbr[s("("), lident, s(")")]  {Read(v)}        |
+                                    kWrite ex=inbr[s("("), exp, s(")")]   {Write(ex)}      |
+                                    ifp | whilep | dowhilep | forp),
+    stmt = memo $ syntax (simpleStmt | sLeft=simpleStmt s[";"] rest=stmt {Seq(sLeft, rest)});
    
 
 -- Public top-level parser

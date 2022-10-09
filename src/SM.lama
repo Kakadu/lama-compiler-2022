@@ -53,6 +53,7 @@ fun execSMIns(c, i) {
     | LD    (x) -> [st(x) : stack, st, w]
     | ST    (x) -> case stack of v : stack -> [stack, st <- [x, v], w] esac
     | CONST (n) -> [n : stack, st, w]
+    | LABEL (_) -> c
     esac
   esac
 }
@@ -84,12 +85,56 @@ fun fromLabel (env, lab) {
   env [0] (lab)
 }
 
+fun insType (i) {
+  case i of
+    READ      -> NonJumping
+  | WRITE     -> NonJumping
+  | BINOP (_) -> NonJumping
+  | LD    (_) -> NonJumping
+  | CONST (_) -> NonJumping
+  | ST    (_) -> NonJumping
+  | LABEL (_) -> NonJumping
+  | _         -> Jumping
+  esac
+}
+
+fun insnsAfterCondJump(env, value, cond, lab, oldInsns) {
+  if (compare(cond, "z") == 0 && value == 0) !! (compare(cond, "nz") == 0 && value) then
+    fromLabel(env, lab)
+  else
+    oldInsns
+  fi
+}
+
+fun confStackPop([v : stack, st, w]) {
+  [v, [stack, st, w]]
+}
+
+fun printInsns(insns) {
+  case insns of
+    {} -> skip
+  | i : insns -> printf ("%s\n", i.string); printInsns(insns)
+  esac
+}
+
 -- Stack machine interpreter. Takes an environment, an SM-configuration and a program,
 -- returns a final configuration
 fun eval (env, c, insns) {
+--  if cnt == 0 then printInsns(insns); cnt := 1 fi;
   case insns of
     {}        -> c
-  | i : insns -> eval(execSMIns(c, i), insns)
+  | i : insns ->
+      case insType(i) of
+        NonJumping -> eval(env, execSMIns(c, i), insns)
+      | Jumping    ->
+          case i of
+            JMP  (l)    -> eval(env, c, fromLabel(env, l))
+          | CJMP (s, l) ->
+              case confStackPop(c) of [v, c] ->
+                eval(env, c, insnsAfterCondJump(env, v, s, l, insns))
+              esac
+          esac
+      esac
   esac
 }
 
@@ -131,12 +176,10 @@ fun genLabels (env, n) {
 -- Compiles an expression into a stack machine code.
 -- Takes an expression, returns a list of stack machine instructions
 fun compileExpr (expr) {
---  failure ("compileSM not implemented\n")
-
   case expr of
-    Var (v)           -> {LD (v)}
-  | Const (c)         -> {CONST (c)}
-  | Binop (b, e1, e2) -> compileExpr(e1) +++ compileExpr(e2) +++ {BINOP (b)}
+    Var (v)           -> singletonBuffer(LD (v))
+  | Const (c)         -> singletonBuffer(CONST (c))
+  | Binop (b, e1, e2) -> compileExpr(e1) <+> compileExpr(e2) <+ BINOP (b)
   esac
 }
 
@@ -178,6 +221,43 @@ public fun compileSM (stmt) {
                   esac
              esac
         esac
+    | If (cond, sTrue, sFalse) ->
+        case env.genLabels(2) of [sTrueEnd, sFalseStart, env] ->
+          case compile (sTrueEnd, env, sTrue) of [sTrueEndUsed, env, sTrueCode] ->
+            case compile (lab, env, sFalse) of [labUsed, env, sFalseCode] ->
+              [true, env, compileExpr(cond)
+                          <+  CJMP ("z", sFalseStart)
+                          <+> sTrueCode
+                          <+> label(sTrueEnd, sTrueEndUsed)
+                          <+  JMP(lab)
+                          <+  LABEL(sFalseStart)
+                          <+> sFalseCode]
+            esac
+          esac
+        esac
+
+    | While (cond, body) ->
+        case env.genLabels(2) of [condStart, bodyEnd, env] ->
+          case compile(bodyEnd, env, body) of [bodyEndUsed, env, bodyCode] ->
+            [true, env, singletonBuffer(LABEL(condStart))
+                        <+> compileExpr(cond)
+                        <+  CJMP("z", lab)
+                        <+> bodyCode
+                        <+> label(bodyEnd, bodyEndUsed)
+                        <+  JMP(condStart)]
+
+          esac
+        esac
+    | DoWhile (body, cond) ->
+        case env.genLabels(2) of [bodyStart, bodyEnd, env] ->
+          case compile(bodyEnd, env, body) of [bodyEndUsed, env, bodyCode] ->
+            [false, env, singletonBuffer(LABEL(bodyStart))
+                         <+> bodyCode
+                         <+> label(bodyEnd, bodyEndUsed)
+                         <+> compileExpr(cond)
+                         <+  CJMP ("nz", bodyStart)]
+          esac
+        esac
     | _              -> failure ("compileSM not implemented\n")
     esac
   }  
@@ -189,3 +269,5 @@ public fun compileSM (stmt) {
        esac
   esac
 }
+
+var cnt = 0;
