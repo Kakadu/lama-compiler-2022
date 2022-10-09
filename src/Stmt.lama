@@ -1,5 +1,6 @@
 -- Statement evaluator.
 
+import List;
 import State;
 import Expr;
 import World;
@@ -16,8 +17,14 @@ import World;
 --        Read   (string)           |
 --        Write  (expr)             |
 
-fun eval (c, stmt) {
-  failure ("Stmt eval not implemented\n")
+fun eval (c @ [state, w], stmt) {
+  case stmt of
+    Assn (x, exp) -> [state <- [x, evalExpr (state, exp)], w]
+  | Seq(s1, s2)   -> foldl (eval, c, {s1, s2})
+  | Skip        -> c
+  | Read(x)    -> case readWorld (w) of [z, world] -> [state <- [x, z], world] esac
+  | Write(exp) -> [state, writeWorld (evalExpr (state, exp), w)]
+  esac
 }
 
 -- Evaluates a program with a given input and returns an output

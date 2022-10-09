@@ -3,6 +3,26 @@
 import List;
 import State;
 
+-- The evaluator of binary operations: takes a binary operation as string,
+-- returns binary operation
+
+public fun evalBinop (binop) {
+  case binop of
+    "+"  -> infix +
+  | "-"  -> infix -
+  | "*"  -> infix *
+  | "/"  -> infix /
+  | "%"  -> infix %
+  | "<"  -> infix <
+  | ">"  -> infix >
+  | "<=" -> infix <=
+  | ">=" -> infix >=
+  | "==" -> infix ==
+  | "!=" -> infix !=
+  | "&&" -> infix &&
+  | "!!" -> infix !!
+  esac
+}
 
 -- The evaluator itself: takes a state and an expression,
 -- returns integer value
@@ -14,5 +34,9 @@ import State;
 --        Binop (string, expr, expr)
 
 public fun evalExpr (st, expr) {
-  failure ("evalExpr not implemented\n")
+  case expr of
+    Const (n)                 -> n
+  | Var (x)                   -> st (x)
+  | Binop (binop, lexp, rexp) -> evalBinop (binop) (evalExpr (st, lexp), evalExpr (st, rexp))
+  esac
 }
