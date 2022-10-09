@@ -280,15 +280,48 @@ fun compile (env, code) {
     fun ([env, scode], i) {
       var code = scode <+ Meta ("# " ++ showSMInsn (i) ++ "\n");
       case i of
-        READ ->
+        READ         ->
           case env.allocate of
-            [s, env] -> [env, code <+ Call ("Lread") <+ Mov (eax, s)]
-          esac             
-      | WRITE ->
-          case env.pop of
-            [s, env] -> [env, code <+ Push (s) <+ Call ("Lwrite") <+ Pop (eax)]
+          [s, env] -> [env, code <+ Call ("Lread") <+ Mov (eax, s)]
           esac
-      | _ -> failure ("codegeneration for instruction %s is not yet implemented\n", i.string)
+      | WRITE        ->
+        case env.pop of
+        [s, env] -> [env, code <+ Push (s) <+ Call ("Lwrite") <+ Pop (eax)]
+        esac
+      | LD(x)        ->
+        case env.addGlobal (x).allocate of
+        [s, env] -> [env, code <+> move (env.loc (x), s)]
+        esac
+      | ST(x)        ->
+        case env.addGlobal (x).pop of
+        [s, env] -> [env, code <+> move (s, env.loc (x))]
+        esac
+      | BINOP(binop) ->
+        case env.pop2 of
+        [exp1, exp2, env] -> (
+          var compBinop =
+            case binop of
+              "+"  -> move (exp2, eax) <+ Binop (binop, exp1, eax) <+> move (eax, exp1)
+            | "-"  -> move (exp2, eax) <+ Binop (binop, exp1, eax) <+> move (eax, exp1)
+            | "*"  -> move (exp2, eax) <+ Binop (binop, exp1, eax) <+> move (eax, exp1)
+            | "/"  -> move (exp2, eax) <+ Cltd <+ IDiv (exp1) <+> move (eax, exp1)
+            | "%"  -> move (exp2, eax) <+ Cltd <+ IDiv (exp1) <+> move (edx, exp1)
+            | "<"  -> singletonBuffer (Binop ("cmp", exp1, exp2)) <+ Set (suffix (binop), "%al") <+> move (eax, exp1)
+            | ">"  -> singletonBuffer (Binop ("cmp", exp1, exp2)) <+ Set (suffix (binop), "%al") <+> move (eax, exp1)
+            | "<=" -> singletonBuffer (Binop ("cmp", exp1, exp2)) <+ Set (suffix (binop), "%al") <+> move (eax, exp1)
+            | ">=" -> singletonBuffer (Binop ("cmp", exp1, exp2)) <+ Set (suffix (binop), "%al") <+> move (eax, exp1)
+            | "==" -> singletonBuffer (Binop ("cmp", exp1, exp2)) <+ Set (suffix (binop), "%al") <+> move (eax, exp1)
+            | "!=" -> singletonBuffer (Binop ("cmp", exp1, exp2)) <+ Set (suffix (binop), "%al") <+> move (eax, exp1)
+            | "&&" -> move (exp2, eax) <+ Binop (binop, eax, exp1)
+            | "!!" -> move (exp2, eax) <+ Binop (binop, eax, exp1)
+            esac;
+          [env.push (exp1), code <+> compBinop]
+        )
+        esac
+      | CONST(n)     ->
+        case env.allocate of
+        [s, env] -> [env, code <+> move (L (n), s)]
+        esac
       esac
     }, [env, emptyBuffer ()], code)
 }
