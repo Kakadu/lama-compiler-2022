@@ -324,8 +324,8 @@ fun compile (env, code) {
                          else singletonBuffer(Binop ("cmp", y, x))
                          fi <+ Set (suffix(binop), "%al") <+ Mov (eax, x)
                     elif compare(binop, "!!") == 0 !! compare(binop, "&&") == 0 then
-                         singletonBuffer(Mov (x, eax)) <+ Binop ("cmp", L(0), eax) <+ Binop ("^", eax, eax) <+ Set ("ne", "%al") <+
-                         Mov (y, edx) <+ Binop ("cmp", L(0), edx) <+ Binop ("^", edx, edx) <+ Set ("ne", "%dl") <+
+                         singletonBuffer(Mov (x, eax)) <+ Binop ("cmp", L(0), eax) <+ Mov (L(0), eax) <+ Set ("ne", "%al") <+
+                         Mov (y, edx) <+ Binop ("cmp", L(0), edx) <+ Mov (L(0), edx) <+ Set ("ne", "%dl") <+
                          Binop (binop, edx, eax) <+ Mov (eax, x)
                     else failure ("codegeneration for instruction %s is not yet implemented\n", binop)
                     fi
