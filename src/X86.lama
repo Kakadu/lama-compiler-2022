@@ -272,6 +272,66 @@ fun suffix (op) {
   esac
 }
 
+-- Used to generate operations +, -, *
+fun compileFirstGroup (op, x, y) {
+  if stackOpnd (x) && stackOpnd (y)
+  then listBuffer ([Mov (y, eax), Binop (op, x, eax), Mov (eax, y)])
+  else singletonBuffer (Binop (op, x, y))
+  fi
+}
+
+-- Used to generate operations /, %
+fun compileSecondGroup (op, x, y, reg) {
+  emptyBuffer() <+ Mov (y, eax) <+ Cltd <+ IDiv (x) <+ Mov (reg, y)
+}
+
+-- Used to generate operations <, <=, !=, ==, >=, >
+fun compileThirdGroup (op, x, y) {
+  if stackOpnd (x) && stackOpnd (y) 
+  then singletonBuffer (Mov (y, edx)) 
+  else emptyBuffer ()
+  fi
+  <+ Binop ("^", eax, eax) 
+  <+ Binop ("cmp", x, y) 
+  <+ Set (suffix (op), "%al") 
+  <+ Mov (eax, y)
+}
+
+-- Used to generate operations &&, !!
+fun compileFourthGroup (op, x, y) {
+  listBuffer (
+    [
+      Mov (x, eax), 
+      Binop ("^", eax, eax), 
+      Binop ("cmp", y, eax), 
+      Set (Suffix ("!="), "%al"), 
+      Binop ("^", edx, edx),
+      Binop ("cmp", x, edx),
+      Set (Suffix ("!="), "%dl"),
+      Binop (op, edx, eax),
+      Mov (eax, y)
+    ]
+  )
+}
+
+fun compileBinop (op, x, y) { 
+  case op of
+    "+"  -> compileFirstGroup  (op, x, y)
+  | "-"  -> compileFirstGroup  (op, x, y)
+  | "*"  -> compileFirstGroup  (op, x, y)
+  | "/"  -> compileSecondGroup (op, x, y, eax)
+  | "%"  -> compileSecondGroup (op, x, y, edx)
+  | "<"  -> compileThirdGroup  (op, x, y)
+  | "<=" -> compileThirdGroup  (op, x, y)
+  | "!=" -> compileThirdGroup  (op, x, y)
+  | "==" -> compileThirdGroup  (op, x, y)
+  | ">=" -> compileThirdGroup  (op, x, y)
+  | ">"  -> compileThirdGroup  (op, x, y)
+  | "&&" -> compileFourthGroup (op, x, y)
+  | "!!" -> compileFourthGroup (op, x, y)
+  esac
+}
+
 -- Compiles stack machine code into a list of x86 instructions. Takes an environment
 -- and stack machine code, returns an updated environment and x86 code.
 fun compile (env, code) {
@@ -287,7 +347,22 @@ fun compile (env, code) {
           case env.pop of
             [s, env] -> [env, code <+ Push (s) <+ Call ("Lwrite") <+ Pop (eax)]
           esac
-      | _ -> failure ("codegeneration for instruction %s is not yet implemented\n", i.string)
+      | BINOP (op) -> 
+          case env.pop2 of
+            [x, y, env] -> [env.push (y), code <+> compileBinop (op, x, y)]
+          esac
+      | LD (name) ->
+          case env.addGlobal (name).allocate of
+            [s, env] -> [env, code <+> move(env.loc (name), s)]
+          esac
+      | ST (name) ->
+          case env.addGlobal (name).pop of
+            [s, env] -> [env, code <+> move(s, env.loc (name))]
+          esac
+      | CONST (v) -> 
+          case env.allocate of
+            [s, env] -> [env, code <+ Mov (L (v), s)]
+          esac
       esac
     }, [env, emptyBuffer ()], code)
 }
