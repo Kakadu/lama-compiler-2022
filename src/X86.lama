@@ -272,6 +272,60 @@ fun suffix (op) {
   esac
 }
 
+fun compileBinop (op, l, r) {
+  var bothInMem = memOpnd (l) && memOpnd (r);
+
+  -- Moves r to eax if r in memory and performs binop. Op must store result in r. 
+  fun memRegBinop (op, l, r) {
+    if bothInMem then 
+      singletonBuffer(Mov (r, eax)) 
+      <+ Binop (op, l, eax) 
+      <+ Mov (eax, r)
+    else 
+      singletonBuffer( Binop (op, l, r) )  
+    fi
+  }
+
+  -- Performs division and stores quotient or remainder in r.
+  fun divRemainBinop (op, l, r) {
+    singletonBuffer (Mov (r, eax)) 
+    <+ Cltd
+    <+ IDiv (l)
+    <+ if compare (op, "/") == 0 then 
+          Mov (eax, r) 
+        else 
+          Mov (edx, r)
+        fi
+  }
+
+  -- Performs int comparison and stores result in r.
+  fun cmpBinop (op, l, r) {
+    singletonBuffer (Binop ("^", eax, eax))
+    <+> if bothInMem then
+          singletonBuffer (Mov (l, edx)) <+ Binop ("cmp", edx, r)
+        else
+          singletonBuffer (Binop ("cmp", l, r))
+        fi
+    <+ Set (suffix (op), "%al")
+    <+ Mov (eax, r)
+  }
+
+  case op of
+      "+"  -> memRegBinop (op, l, r)
+    | "-"  -> memRegBinop (op, l, r)
+    | "*"  -> memRegBinop (op, l, r)
+    | "/"  -> divRemainBinop (op, l, r)
+    | "%"  -> divRemainBinop (op, l, r)
+    | "<"  -> cmpBinop (op, l, r)
+    | ">"  -> cmpBinop (op, l, r)
+    | "<=" -> cmpBinop (op, l, r)
+    | ">=" -> cmpBinop (op, l, r)
+    | "==" -> cmpBinop (op, l, r)
+    | "!=" -> cmpBinop (op, l, r)
+    | _ -> failure ("Unsupported operation %s", op)
+  esac
+}
+
 -- Compiles stack machine code into a list of x86 instructions. Takes an environment
 -- and stack machine code, returns an updated environment and x86 code.
 fun compile (env, code) {
@@ -287,7 +341,22 @@ fun compile (env, code) {
           case env.pop of
             [s, env] -> [env, code <+ Push (s) <+ Call ("Lwrite") <+ Pop (eax)]
           esac
-      | _ -> failure ("codegeneration for instruction %s is not yet implemented\n", i.string)
+      | CONST (n) ->
+          case env.allocate of
+            [s, env] -> [env, code <+> move (L (n), s)]
+          esac
+      | LD (x) ->
+          case env.addGlobal (x).allocate of
+            [s, env] -> [env, code <+> move (env.loc (x), s)]
+          esac
+      | ST (x) ->
+          case env.addGlobal (x).pop of
+            [s, env] -> [env, code <+> move (s, env.loc (x))]
+          esac
+      | BINOP (op) ->
+          case env.pop2 of
+            [x, y, env] -> [ env.push (y), code <+> compileBinop (op, x, y)]
+          esac
       esac
     }, [env, emptyBuffer ()], code)
 }
