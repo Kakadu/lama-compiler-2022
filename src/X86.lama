@@ -287,7 +287,39 @@ fun compile (env, code) {
           case env.pop of
             [s, env] -> [env, code <+ Push (s) <+ Call ("Lwrite") <+ Pop (eax)]
           esac
-      | _ -> failure ("codegeneration for instruction %s is not yet implemented\n", i.string)
+      | BINOP (op) -> 
+        case env.pop2 of
+          [y, x, env] ->
+            var insns =
+              case op of 
+                    "+" -> move(x, eax) <+ Binop(op, y, eax) <+> move(eax, y)
+                    | "-" -> move(x, eax) <+ Binop(op, y, eax) <+> move(eax, y)
+                    | "*" -> move(x, eax) <+ Binop(op, y, eax) <+> move(eax, y)
+                    | "/" -> move(x, eax) <+ Cltd <+ IDiv(y) <+> move(eax, y)
+                    | "%" -> move(x, eax) <+ Cltd <+ IDiv(y) <+> move(edx, y)
+                    | "<" -> listBuffer({Binop("cmp", y, x), Set(suffix(op), "%al")}) <+> move(eax, y)
+                    | ">" -> listBuffer({Binop("cmp", y, x), Set(suffix(op), "%al")}) <+> move(eax, y)
+                    | "<=" -> listBuffer({Binop("cmp", y, x), Set(suffix(op), "%al")}) <+> move(eax, y)
+                    | ">=" -> listBuffer({Binop("cmp", y, x), Set(suffix(op), "%al")}) <+> move(eax, y)
+                    | "==" -> listBuffer({Binop("cmp", y, x), Set(suffix(op), "%al")}) <+> move(eax, y)
+                    | "!=" -> listBuffer({Binop("cmp", y, x), Set(suffix(op), "%al")}) <+> move(eax, y)
+                    | "&&" -> move(x, eax) <+ Binop(op, eax, y)
+                    | "!!" -> move(x, eax) <+ Binop(op, eax, y)
+              esac; 
+            [env.push(y), code <+> insns] 
+        esac
+      | LD (x) -> 
+        case env.addGlobal(x).allocate of
+          [s, env] -> [env, code <+> move(env.loc(x), s)]
+        esac
+      | ST (x) -> 
+        case env.addGlobal(x).pop of
+          [s, env] -> [env, code <+> move(s, env.loc(x))]
+        esac
+      | CONST (n) -> 
+        case env.allocate of
+          [s, env] -> [env, code <+> move(L(n), s)]
+        esac
       esac
     }, [env, emptyBuffer ()], code)
 }
