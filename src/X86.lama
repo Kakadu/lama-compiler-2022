@@ -272,6 +272,40 @@ fun suffix (op) {
   esac
 }
 
+fun compileBinOp (op, lhs, rhs) {
+  fun division () {
+    singletonBuffer (Mov (lhs, edi)) <+ Mov (rhs, eax) <+ Cltd <+ IDiv (edi)
+  }
+
+  fun arithm () {
+    if stackOpnd (lhs) && stackOpnd (rhs) then
+      singletonBuffer (Mov (lhs, eax)) <+ Binop (op, eax, rhs)
+    else
+      singletonBuffer (Binop (op, lhs, rhs))
+    fi
+  }
+
+  fun comparison () {
+    singletonBuffer (Mov (lhs, edx)) <+ Mov (rhs, eax) <+ Binop ("cmp", edx, eax) <+
+    Mov (L (0), eax) <+ Set (suffix (op), "%al") <+ Mov (eax, rhs)
+  }
+
+  case op of
+    "+"  -> arithm ()
+  | "-"  -> arithm ()
+  | "*"  -> arithm ()
+  | "/"  -> division () <+ Mov (eax, rhs)
+  | "%"  -> division () <+ Mov (edx, rhs)
+  | "<"  -> comparison ()
+  | "<=" -> comparison ()
+  | "==" -> comparison ()
+  | "!=" -> comparison ()
+  | ">=" -> comparison ()
+  | ">"  -> comparison ()
+  | _    -> failure ("Unknown binary operator %s\n", op.string)
+  esac
+}
+
 -- Compiles stack machine code into a list of x86 instructions. Takes an environment
 -- and stack machine code, returns an updated environment and x86 code.
 fun compile (env, code) {
@@ -286,6 +320,22 @@ fun compile (env, code) {
       | WRITE ->
           case env.pop of
             [s, env] -> [env, code <+ Push (s) <+ Call ("Lwrite") <+ Pop (eax)]
+          esac
+      | CONST (n) ->
+          case env.allocate of
+            [s, env] -> [env, code <+ Mov (L (n), s)]
+          esac
+      | ST (x) ->
+          case env.pop of
+            [s, env] -> [env, code <+> move (s, env.loc (x))]
+          esac
+      | LD (x) ->
+          case env.addGlobal (x).allocate of
+            [s, env] -> [env, code <+> move (env.loc (x), s)]
+          esac
+      | BINOP (op) ->
+          case env.pop2 of
+            [lhs, rhs, env] -> [env.push (rhs), code <+> compileBinOp (op, lhs, rhs)]
           esac
       | _ -> failure ("codegeneration for instruction %s is not yet implemented\n", i.string)
       esac
