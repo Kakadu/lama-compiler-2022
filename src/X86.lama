@@ -318,7 +318,7 @@ fun compile (env, code) {
                     | ">=" -> listBuffer({Binop("cmp", y, x), Set(suffix(op), "%al")}) <+> move(eax, y)
                     | "&&" -> move(x, eax) <+ Binop(op, eax, y)
                     | "!!" -> move(x, eax) <+ Binop(op, eax, y)
-              esac; 
+              esac
             [env.push(y), code <+> insns] 
         esac
       esac
