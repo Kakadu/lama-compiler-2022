@@ -275,19 +275,24 @@ fun suffix (op) {
 
 fun compileBinop (op, l, r) {
   fun compileBasicOp (op, l, r) {
-    emptyBuffer() <+ Mov (r, edi)
-                  <+ Binop (op, l, edi) <+ Mov (edi, r)
+    if stackOpnd(l) && stackOpnd(r) then
+      emptyBuffer() <+ Mov (r, edi)
+                    <+ Binop (op, l, edi) <+ Mov (edi, r)
+    else
+      emptyBuffer() <+ Binop (op, l, r)
+    fi
   }
 
   fun compileCompareOp (op, l, r) {
     emptyBuffer() <+ Mov (l, edi) <+ Mov (r, esi)
                   <+ Binop ("cmp", edi, esi)
-                  <+ Set (suffix(op), "%al") <+ Mov (eax, r)
+                  <+ Mov (L (0), ebx)
+                  <+ Set (suffix(op), "%bl") <+ Mov (ebx, r)
   }
 
   fun compileDivOp (op, l, r) {
-     var buf = emptyBuffer() <+ Mov (l, edi) <+ Mov (r, esi) <+ Cltd
-                          <+ IDiv (edi);
+     var buf = emptyBuffer() <+ Mov (l, edi) <+ Mov (r, eax) <+ Cltd
+                             <+ IDiv (edi);
 
     case op of
       "/" -> buf <+ Mov (eax, r)
@@ -343,7 +348,7 @@ fun compile (env, code) {
             [l, r, env] -> [env.push(r), code <+> compileBinop(op, l, r)]
           esac
       esac
-    }, [env, emptyBuffer ()], code)
+    }, [env, emptyBuffer ()], getBuffer(code))
 }
 
 -- A top-level codegeneration function. Takes a driver's environment and a stack machine program,
