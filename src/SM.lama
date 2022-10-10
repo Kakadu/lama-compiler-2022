@@ -34,14 +34,10 @@ fun eval (c, instr) {
       | BINOP (x) -> case stack of hd1 : hd2 : tl -> [evalBinop(x, hd2, hd1):tl, state, world] esac
       | LD (x)    -> [state(x):stack, state, world]
       | ST (x)    -> case stack of hd : tl -> [tl, state <- [x, hd], world] esac
-      | CONST (x) -> [x:stack, state, world]
+      | CONST (x) -> [x:stack, state, world]  
     esac
   }
-
-  case instr of
-    { }       -> c
-    | hd : tl -> eval(helper(c, hd), tl)
-  esac
+  foldl(helper, c, instr)
 }
 
 -- Runs a stack machine for a given input and a given program, returns an output
