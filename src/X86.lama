@@ -288,13 +288,64 @@ fun compile (env, code) {
           case env.pop of
             [s, env] -> [env, code <+ Push (s) <+ Call ("Lwrite") <+ Pop (eax)]
           esac
+      | CONST (n) ->
+          case env.allocate of
+            [s, env] -> [env, code <+> move (L (n), s)]
+          esac
+      | LD (x) ->
+          case env.addGlobal (x).allocate of
+            [s, env] -> [env, code <+> move (env.loc (x), s)]
+          esac
+      | ST (x) ->
+          case env.addGlobal (x).pop of 
+            [s, env] -> [env, code <+> move (s, env.loc (x))]
+          esac
+      | BINOP (op) ->
+          case env.pop2 of
+            [x, y, env] ->
+              case op of
+                  "+" -> compileAddSubMul (x, y, op, env.allocate, code)
+                | "-" -> compileAddSubMul (x, y, op, env.allocate, code)
+                | "*" -> compileAddSubMul (x, y, op, env.allocate, code)
+                | "/" -> compileDivMod (x, y, op, env.allocate, code, eax)
+                | "%" -> compileDivMod (x, y, op, env.allocate, code, edx)
+                | "<" -> compileCmp (x, y, op, env.allocate, code)
+                | ">" -> compileCmp (x, y, op, env.allocate, code)
+                | ">=" -> compileCmp (x, y, op, env.allocate, code)
+                | "<=" -> compileCmp (x, y, op, env.allocate, code)
+                | "==" -> compileCmp (x, y, op, env.allocate, code)
+                | "!=" -> compileCmp (x, y, op, env.allocate, code)
+                | "&&" -> 
+                  case env.allocate of
+                    [s, env] -> [env, code <+> move (x, eax) <+ Binop (op, x, eax) <+> move (L (0), eax) <+ Set ("ne", "%al") 
+                                          <+> move (y, edx) <+ Binop (op, y, edx) <+> move (L (0), edx) <+ Set ("ne", "%dl")
+                                          <+ Binop (op, edx, eax) <+ Set ("ne", "%al") <+> move (eax, s)]
+                  esac
+                | "!!" -> 
+                  case env.allocate of
+                    [s, env] -> [env, code <+> move (y, eax) <+ Binop (op, x, eax) <+> move (L (0), eax) <+ Set ("ne", "%al") <+> move (eax, s)]
+                  esac
+              esac    
+          esac
       | _ -> failure ("codegeneration for instruction %s is not yet implemented\n", i.string)
       esac
     }, [env, emptyBuffer ()], code)
 }
 
--- A top-level codegeneration function. Takes a driver's environment and a stack machine program,
--- compiles the program into machine code, and compiles the machine code into an executable
+fun compileAddSubMul (x, y, op, [s, env], code) {
+  [env, code <+> move (y, eax) <+ Binop (op, x, eax) <+> move (eax, s)]
+}
+
+fun compileDivMod (x, y, op, [s, env], code, reg) {
+  [env, code <+> move (y, eax) <+ Cltd <+ IDiv (x) <+> move (reg, s)]
+}
+
+fun compileCmp (x, y, op, [s, env], code) {
+  [env, code <+> move(y, eax) <+ Binop ("cmp", x, eax) <+> move (L (0), eax) <+ Set (suffix (op), "%al") <+> move (eax, s)]
+}
+
+-- A top-level codegeneration function. Takes a stack machine program
+-- and returns x86 listing as a string
 public fun compileX86 (args, code) {
   case compile (initEnv (), code) of
     [env, code] ->
