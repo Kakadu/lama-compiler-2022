@@ -272,6 +272,24 @@ fun suffix (op) {
   esac
 }
 
+fun binop(op, expr1, expr2) {
+  case op of
+      "+"  -> move(expr1, eax) <+> singletonBuffer(Binop(op, eax, expr2))
+    | "-"  -> move(expr1, eax) <+> singletonBuffer(Binop(op, expr2, eax)) <+> move(eax, expr2)
+    | "*"  -> move(expr1, eax) <+> singletonBuffer(Binop(op, eax, expr2))
+    | "/"  -> move(expr1, eax) <+ Cltd <+ IDiv(expr2) <+> move(eax, expr2)
+    | "%"  -> move(expr1, eax) <+ Cltd <+ IDiv(expr2) <+> move(edx, expr2)
+    | "<"  -> singletonBuffer(Binop("cmp", expr2, expr1)) <+ Set(suffix(op), "%al") <+> move(eax, expr2)
+    | ">"  -> singletonBuffer(Binop("cmp", expr2, expr1)) <+ Set(suffix(op), "%al") <+> move(eax, expr2)
+    | "<=" -> singletonBuffer(Binop("cmp", expr2, expr1)) <+ Set(suffix(op), "%al") <+> move(eax, expr2)
+    | ">=" -> singletonBuffer(Binop("cmp", expr2, expr1)) <+ Set(suffix(op), "%al") <+> move(eax, expr2)
+    | "==" -> singletonBuffer(Binop("cmp", expr2, expr1)) <+ Set(suffix(op), "%al") <+> move(eax, expr2)
+    | "!=" -> singletonBuffer(Binop("cmp", expr2, expr1)) <+ Set(suffix(op), "%al") <+> move(eax, expr2)
+    | "&&" -> move(expr1, eax) <+> singletonBuffer(Binop(op, eax, expr2))
+    | "!!" -> move(expr1, eax) <+> singletonBuffer(Binop(op, eax, expr2)) 
+  esac
+}
+
 -- Compiles stack machine code into a list of x86 instructions. Takes an environment
 -- and stack machine code, returns an updated environment and x86 code.
 fun compile (env, code) {
@@ -279,15 +297,31 @@ fun compile (env, code) {
     fun ([env, scode], i) {
       var code = scode <+ Meta ("# " ++ showSMInsn (i) ++ "\n");
       case i of
-        READ ->
-          case env.allocate of
-            [s, env] -> [env, code <+ Call ("Lread") <+ Mov (eax, s)]
-          esac             
-      | WRITE ->
-          case env.pop of
-            [s, env] -> [env, code <+ Push (s) <+ Call ("Lwrite") <+ Pop (eax)]
-          esac
-      | _ -> failure ("codegeneration for instruction %s is not yet implemented\n", i.string)
+          READ ->
+            case env.allocate of
+              [s, env] -> [env, code <+ Call ("Lread") <+ Mov (eax, s)]
+            esac             
+        | WRITE ->
+            case env.pop of
+              [s, env] -> [env, code <+ Push (s) <+ Call ("Lwrite") <+ Pop (eax)]
+            esac
+        | CONST(value) -> 
+            case env.allocate of
+              [s, env] -> [env, code <+> move(L(value), s)]
+            esac
+        | LD(name) -> 
+            case env.addGlobal(name).allocate of
+              [s, env] -> [env, code <+> move(env.loc(name), s)]
+            esac
+        | ST(name) -> 
+            case env.addGlobal(name).pop of
+              [s, env] -> [env, code <+> move(s, env.loc(name))]
+            esac
+        | BINOP(op) -> 
+            case env.pop2 of
+              [expr1, expr2, env] -> [env.push(expr1), code <+> binop(op, expr2, expr1)]
+            esac
+        | _ -> failure ("codegeneration for instruction %s is not yet implemented\n", i.string)
       esac
     }, [env, emptyBuffer ()], code)
 }

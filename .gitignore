@@ -1,2 +1,9 @@
+
+
+regression/
+
 *.i
+
+*.o
+
 *.s
