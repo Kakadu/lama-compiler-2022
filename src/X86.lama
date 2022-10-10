@@ -279,6 +279,44 @@ fun suffix (op) {
   esac
 }
 
+fun compileBinop (op, l, r) {
+  fun compileBasicOp (op, l, r) {
+    emptyBuffer() <+ Mov (r, edi)
+                  <+ Binop (op, l, edi) <+ Mov (edi, r)
+  }
+
+  fun compileCompareOp (op, l, r) {
+    emptyBuffer() <+ Mov (l, edi) <+ Mov (r, esi)
+                  <+ Binop ("cmp", edi, esi)
+                  <+ Set (suffix(op), "%al") <+ Mov (eax, r)
+  }
+
+  fun compileDivOp (op, l, r) {
+     var buf = emptyBuffer() <+ Mov (l, edi) <+ Mov (r, esi) <+ Cltd
+                          <+ IDiv (edi);
+
+    case op of
+      "/" -> buf <+ Mov (eax, r)
+    | "%" -> buf <+ Mov (edx, r)
+    esac
+  }
+
+  case op of
+    "*"   -> compileBasicOp(op, l, r)
+  | "/"   -> compileDivOp(op, l, r)
+  | "+"   -> compileBasicOp(op, l, r)
+  | "-"   -> compileBasicOp(op, l, r)
+  | ">"   -> compileCompareOp(op, l, r)
+  | ">="  -> compileCompareOp(op, l, r)
+  | "<"   -> compileCompareOp(op, l, r)
+  | "<="  -> compileCompareOp(op, l, r)
+  | "=="  -> compileCompareOp(op, l, r)
+  | "!="  -> compileCompareOp(op, l, r)
+  | "%"   -> compileDivOp(op, l, r)
+  | _ -> failure ("Binop evaluation error: unknown operator")
+  esac
+}
+
 -- Compiles stack machine code into a list of x86 instructions. Takes an environment
 -- and stack machine code, returns an updated environment and x86 code.
 fun compile (env, code) {
@@ -294,9 +332,25 @@ fun compile (env, code) {
           case env.pop of
             [s, env] -> [env, code <+ Push (s) <+ Call ("Lwrite") <+ Pop (eax)]
           esac
-      | _ -> failure ("codegeneration for instruction %s is not yet implemented\n", i.string)
-        esac
-    }, [env, emptyBuffer ()], code)}
+      | CONST (n) ->
+          case env.allocate of
+            [s, env] -> [env, code <+> move(L (n), s)]
+          esac
+      | LD (x) ->
+          case env.addGlobal (x).allocate of
+            [s, env] -> [env, code <+> move(env.loc(x), s)]
+          esac
+      | ST (x) ->
+          case env.addGlobal (x).pop of
+            [s, env] -> [env, code <+> move(s, env.loc(x))]
+          esac
+      | BINOP (op) ->
+          case env.pop2 of
+            [l, r, env] -> [env.push(r), code <+> compileBinop(op, l, r)]
+          esac
+      esac
+    }, [env, emptyBuffer ()], code)
+}
 
 -- A top-level codegeneration function. Takes a driver's environment and a stack machine program,
 -- compiles the program into machine code, and compiles the machine code into an executable
