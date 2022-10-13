@@ -347,6 +347,52 @@ fun suffix (op) {
   esac
 }
 
+fun getOpType (op) {
+  case op of
+    "+"  -> General
+  | "-"  -> General
+  | "*"  -> General
+  | "&&" -> Logical
+  | "!!" -> Logical
+  | "/"  -> Division
+  | "%"  -> Division
+  | _    -> Comparison
+  esac
+}
+
+fun genGeneral (op, l, r) {
+  if memOpnd (l)
+  then singletonBuffer (Mov (l, eax)) <+ Binop (op, r, eax) <+ Mov (eax, l)
+  else singletonBuffer (Binop (op, r, l))
+  fi
+}
+
+fun genLogical (op, l, r) {
+  singletonBuffer (Mov (l, eax)) <+ Mov (L (0), edx) <+ Binop ("cmp", eax, edx) <+
+  Mov (L (0), eax) <+ Set ("ne", "%al") <+ Push (eax) <+ Mov (r, eax) <+
+  Binop ("cmp", eax, edx) <+ Mov (L (0), eax) <+ Set ("ne", "%al") <+ Pop (edx) <+
+  Binop (op, edx, eax) <+ Mov (eax, l)
+}
+
+fun genDivision (op, l, r) {
+  singletonBuffer (Mov (l, eax)) <+ Cltd <+ IDiv (r) <+
+  Mov (case op of "/" -> eax | "%" -> edx esac, l)
+}
+
+fun genComparison (op, l, r) {
+  singletonBuffer (Mov (l, eax)) <+ Mov (r, edx) <+ Binop("cmp", edx, eax) <+
+  Mov (L (0), eax) <+ Set (suffix(op), "%al") <+ Mov (eax, l)
+}
+
+fun genBinOp (op, l, r) {
+  case getOpType (op) of
+    General    -> genGeneral (op, l, r)
+  | Logical    -> genLogical (op, l, r)
+  | Division   -> genDivision (op, l, r)
+  | Comparison -> genComparison (op, l, r)
+  esac
+}
+
 -- Compiles stack machine code into a list of x86 instructions. Takes an environment
 -- and stack machine code, returns an updated environment and x86 code.
 fun compile (env, code) {
@@ -362,6 +408,49 @@ fun compile (env, code) {
         | WRITE ->
             case env.pop of
               [s, env] -> [env, code <+ Push (s) <+ Call ("Lwrite") <+ Pop (eax)]
+            esac
+        | CONST (n) ->
+          case env.allocate of
+            [s, env] -> [env, code <+> move (L (n), s)]
+          esac
+        | LD (x) ->
+            case env.addGlobal (x).allocate of
+              [s, env] -> [env, code <+> move (env.loc (x), s)]
+            esac
+        | ST (x) ->
+            case env.addGlobal (x) of
+              env -> [env, code <+> move (env.peek, env.loc (x))]
+            esac
+        | BINOP (op) ->
+            case env.pop2 of
+              [r, l, env] -> [env.push(l), code <+> genBinOp(op, l, r)]
+            esac
+        | LABEL (l) ->
+          if env.isBarrier
+          then env := env.retrieveStack (l)
+          fi;
+
+          [env, code <+ Label (l)]
+        | JMP (l) ->
+          case env.setStack (l).setBarrier of
+            env -> [env, code <+ Jmp (l)]
+          esac
+        | CJMP (c, l) ->
+          case env.pop of
+            [s, env] -> [env.setStack (l), code <+ Mov (L (0), eax) <+ Binop ("cmp", eax, s) <+
+                         CJmp (c, l)]
+          esac
+        | LDA (x) ->
+            case env.addGlobal (x).allocate of
+              [s, env] -> [env, code <+ Lea (env.loc (x), eax) <+ Mov (eax, s)]
+            esac
+        | STI ->
+            case env.pop2 of
+              [v, x, env] -> [env.push (x), code <+ Mov (v, I (0, x)) <+ Mov (v, x)]
+            esac
+        | DROP ->
+            case env.pop of
+              [_, env] -> [env, code]
             esac
         | _ -> failure ("codegeneration for instruction %s is not yet implemented\n", i.string)
         esac
