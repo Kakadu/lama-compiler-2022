@@ -63,10 +63,63 @@ fun evalList (c, exprs) {
   esac
 }
 
-fun eval (c@[s, w], expr) {
-  failure ("evalExpr not implemented\n")
+fun eval (c@[state, world], expr) {
+  case expr of
+    Const (n) -> [c, Val (n)]
+  | Var (x) -> [c, Val (state (x))]
+  | Ref (x) -> [c, Ref (x)]
+  | Binop (op, l, r) ->
+      case evalList (c, {l, r}) of
+        [new_config, {Val (x), Val (y)}] ->
+          [new_config, Val (evalOp (op, x, y))]
+      esac
+  | Skip -> [c, Void]
+  | Assn (expr1, expr2) ->
+      case evalList (c, {expr1, expr2}) of
+        [[new_state, new_world], {Ref (x), Val (v)}] ->
+          [[new_state <- [x, v], new_world], Val (v)]
+      esac
+  | Read (x) ->
+      case readWorld (world) of
+        [value, new_world] ->
+          [[state <- [x, value], new_world], Void]
+      esac
+  | Write (expr) ->
+      case eval (c, expr) of
+        [[new_state, new_world], Val (v)] ->
+          [[new_state, writeWorld (v, new_world)], Void]
+      esac
+  | Seq (expr1, expr2) ->
+      case evalList (c, {expr1, expr2}) of
+        [new_config, {_, expr2_res}] ->
+          [new_config, expr2_res]
+      esac
+  | If (cond_expr, true_expr, false_expr) ->
+      case eval (c, cond_expr) of
+        [new_config, Val (cond_val)] ->
+          eval (new_config, if cond_val then true_expr else false_expr fi)
+      esac
+  | While (cond_expr, body_expr) ->
+      case eval (c, cond_expr) of
+        [new_config, Val (cond_val)] ->
+          if cond_val then
+            case eval (new_config, body_expr) of
+              [newest_config, _] -> eval (newest_config, While (cond_expr, body_expr))
+            esac
+          else
+            [new_config, Void]
+          fi
+      esac
+  | DoWhile (body_expr, cond_expr) ->
+      case eval (c, body_expr) of
+        [new_config, _] -> eval (new_config, While (cond_expr, body_expr))
+      esac
+  | Ignore (expr) ->
+      case eval (c, expr) of
+        [new_config, _] -> [new_config, Void]
+      esac
+  esac
 }
-
 
 -- Evaluates a program with a given input and returns an output
 public fun evalExpr (input, expr) {
