@@ -49,22 +49,30 @@ fun initEvalEnv(insns) {
 
 -- Accessor function
 fun fromLabel(env, lab) {
-  env [0](lab)
+  env[0](lab)
 }
 
 -- Stack machine interpreter. Takes an environment, an SM-configuration and a program,
 -- returns a final configuration
 fun eval(env, c @ [stack, state, world], insns) {
-  failure("SM eval not implemented\n")
--- case insns of
---     { }           -> c
---   | CONST (n) : p -> eval([n:stack, state, world], p)
---   | BINOP (s) : p -> case stack of y : x : tl -> eval([binop(s)(x, y):tl, state, world], p) esac
---   | READ : p      -> case readWorld(world) of [v, newWorld] -> eval([v:stack, state, newWorld], p) esac
---   | WRITE : p     -> case stack of n : tl -> eval([tl, state, writeWorld(n, world)], p) esac
---   | LD (x) : p    -> eval([state(x):stack, state, world], p)
---   | ST (x) : p    -> case stack of n : tl -> eval([tl, state <- [x, n], world], p) esac
--- esac
+  case insns of
+      { }              -> c
+    | CONST (n) : p    -> eval(env, [n:stack, state, world], p)
+    | BINOP (s) : p    -> case stack of y : x : tl -> eval(env, [binop(s)(x, y):tl, state, world], p) esac
+    | READ : p         -> case readWorld(world) of [v, newWorld] -> eval(env, [v:stack, state, newWorld], p) esac
+    | WRITE : p        -> case stack of n : tl -> eval(env, [tl, state, writeWorld(n, world)], p) esac
+    | LD (x) : p       -> eval(env, [state(x):stack, state, world], p)
+    | ST (x) : p       -> case stack of n : tl -> eval(env, [tl, state <- [x, n], world], p) esac
+    | LABEL (s) : p    -> eval(env, c, p)
+    | JMP   (l) : _    -> eval(env, c, env.fromLabel(l))
+    | CJMP  (c, l) : p ->
+      case [c, stack] of
+          ["z", 0 : tl]  -> eval(env, [tl, state, world], env.fromLabel(l))
+        | ["z", _ : tl]  -> eval(env, [tl, state, world], p)
+        | ["nz", 0 : tl] -> eval(env, [tl, state, world], p)
+        | ["nz", _ : tl] -> eval(env, [tl, state, world], env.fromLabel(l))
+      esac
+  esac
 }
 
 -- Runs a stack machine for a given input and a given program, returns an output
@@ -85,7 +93,7 @@ fun initCompEnv() {
 
 -- Accessor function: generates one label
 fun genLabel(env) {
-  env [0]()
+  env[0]()
 }
 
 -- Utility function: generates n labels
@@ -150,7 +158,42 @@ public fun compileSM(stmt) {
                 esac
             esac
         esac
-      | _              -> failure("compileSM not implemented\n")
+      | While (e, s)   ->
+        case env.genLabels(2) of
+          [condLab, bodyLab, env] ->
+            case compile(condLab, env, s) of
+              [condLabUsed, env, bodyCode] -> [
+                false,
+                env,
+                singletonBuffer(JMP(condLab)) <+ LABEL(bodyLab) <+> bodyCode <+ LABEL(condLab) <+> compileExpr(e) <+ CJMP("nz", bodyLab)
+              ]
+            esac
+        esac
+      | DoWhile (s, e) ->
+        case env.genLabels(2) of
+          [condLab, bodyLab, env] ->
+            case compile(condLab, env, s) of
+              [condLabUsed, env, bodyCode] -> [
+                false,
+                env,
+                singletonBuffer(LABEL(bodyLab)) <+> bodyCode <+ LABEL(condLab) <+> compileExpr(e) <+ CJMP("nz", bodyLab)
+              ]
+            esac
+        esac
+      | If (e, s1, s2) ->
+        case env.genLabel of
+          [elseLab, env] ->
+            case compile(lab, env, s1) of
+              [_, env, mainCode] ->
+                case compile(lab, env, s2) of
+                  [_, env, elseCode] -> [
+                    true,
+                    env,
+                    compileExpr(e) <+ CJMP("z", elseLab) <+> mainCode <+ JMP(lab) <+ LABEL(elseLab) <+> elseCode
+                  ]
+                esac
+            esac
+        esac
     esac
   }
 
