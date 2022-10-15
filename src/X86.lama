@@ -315,12 +315,12 @@ fun compile(env, code) {
                 elif op.isOneOf({ "/", "%" }) then
                   move(x, eax) <+ Cltd <+ IDiv(y) <+> move(if compare(op, "/") == 0 then eax else edx fi, y)
                 elif op.isOneOf({ "<", ">", "<=", ">=", "==", "!=" }) then
-                  singletonBuffer(Binop("cmp", y, x)) <+ Set(suffix(op), "%al") <+> move(eax, y)
+                  move(x, eax) <+ Binop("^", edx, edx) <+ Binop("cmp", y, eax) <+ Set(suffix(op), "%dl") <+> move(edx, y)
                 elif op.isOneOf({ "&&", "!!" }) then
                   listBuffer({
-                    move(x, eax), Binop("cmp", L(0), eax), Set(suffix("!="), "%al"),
-                    move(y, edx), Binop("cmp", L(0), edx), Set(suffix("!="), "%dl"),
-                    Binop(op, edx, eax), move(eax, y)
+                    Binop("^", eax, eax), Binop("cmp", x, eax), Set(suffix("!="), "%al"),
+                    Binop("^", edx, edx), Binop("cmp", y, edx), Set(suffix("!="), "%dl"),
+                    Binop(op, edx, eax), Mov(eax, y)
                   })
                 else
                   failure("unkown binary operator %s\n", op)
