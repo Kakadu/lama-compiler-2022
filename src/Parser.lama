@@ -52,19 +52,57 @@ fun binop (op) {
   ]
 }
 
-var primary  = memo $ eta syntax (
-                                  -- decimal constant
-                                  loc=pos x=decimal                                 {fun (a) {assertValue (a, Const (stringInt (x)), loc)}}     |
-
-                                  -- identifier
-                                  x=lident                                          {fun (a) {
-                                                                                       case a of
-                                                                                         Ref  -> Ref (x)
-                                                                                       | Void -> Ignore (Var (x))
-                                                                                       | _    -> Var (x)
-                                                                                       esac
-                                                                                    }} |
-                                  $(failure ("the rest of primary parsing in not implemented\n"))),
+var primary  = memo $ eta syntax (loc=pos x=decimal {
+                                      fun (a) {assertValue (a, Const (stringInt (x)), loc)}
+                                  } |
+                                  x=lident {
+                                      fun (a) {
+                                              case a of
+                                                Ref  -> Ref (x)
+                                              | Void -> Ignore (Var (x))
+                                              | _    -> Var (x)
+                                              esac
+                                      }
+                                  } |
+                                  loc=pos kSkip {
+                                      fun (a) {assertVoid (a, Skip, loc)}
+                                  } |
+                                  loc=pos kRead x=inbr[s ("("), lident, s (")")] {
+                                      fun (a) {assertVoid (a, Read (x), loc)}
+                                  } |
+                                  loc=pos kWrite x=inbr[s("("), exp, s(")")] {
+                                      fun (a) {assertVoid (a, Write (x (Val)), loc)}
+                                  } |
+                                  loc=pos kWhile e=exp kDo x=exp kOd {
+                                      fun (a) {assertVoid (a, While (e (Val), x (Void)), loc)}
+                                  } |
+                                  loc=pos kDo x=exp kWhile e=exp kOd {
+                                      fun (a) {assertVoid (a, DoWhile (x (Void), e (Val)), loc)}
+                                  } |
+                                  loc=pos kIf e=exp kThen x=exp kElse y=exp kFi {
+                                      fun (a) {If (e (Val), x (a), y (a))}
+                                  } |
+                                  loc=pos kIf e=exp kThen x=exp kFi {
+                                      fun (a) {assertVoid (a, If (e (Val), x (Void), Skip), loc)}
+                                  } |
+                                  loc=pos kIf e=exp kThen x=exp y=elif_prs {
+                                      fun (a) {If (e (Val), x (a), y (a))}
+                                  } |
+                                  loc=pos kFor x=exp s[","] e=exp s[","] y=exp kDo loop_exp=exp kOd {
+                                      fun (a) {assertVoid (a, Seq (x (Void), While (e (Val), Seq (loop_exp (Void), y (Void)))), loc)}
+                                  } |
+                                  loc=pos e=inbr[s("("), exp, s(")")] {
+                                      e
+                                  }),
+    elif_prs = memo $ eta syntax (kElif e=exp kThen x=exp y=elif_prs {
+                                      fun (a) {If (e (Val), x (a), y (a))}
+                                  } |
+                                  kElse z=exp kFi {
+                                      z
+                                  } |
+                                  loc=pos kFi {
+                                      fun (a) {assertVoid (a, Skip, loc)}
+                                  }),
     basic    = memo $ eta (expr ({[Right, {[s (":="),
                                             fun (l, loc, r) {
                                               fun (a) {assertValue (a, Assn (l (Ref), r (Val)), loc)}
@@ -75,7 +113,7 @@ var primary  = memo $ eta syntax (
                                   [Left , map (binop, {"+", "-"})],
                                   [Left , map (binop, {"*", "/", "%"})]
                                  },
-                                 primary)),
+                                 primary) | primary),
     exp      = memo $ eta syntax (basic | s1=basic s[";"] s2=exp {fun (a) {Seq (s1 (Void), s2 (a))}});
 
 -- Public top-level parser
