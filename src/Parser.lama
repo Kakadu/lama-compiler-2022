@@ -225,10 +225,115 @@ var
                         | Some (args) -> chainST (args) => fun (args) {Sexp (x, args)}
                         esac, loc)}
     } |
-  
-    $(failure ("the rest of primary parsing in not implemented\n"))),
-   
 
+    loc=pos kIf e=exp kThen x=scopeExpr y=elif_prs {
+        fun (a) {
+            e (Val) =>> fun (e) {
+                x (a) =>> fun (x) {
+                    y (a) => fun (y) {If (e, x, y)}
+                }
+            }
+        }
+    } |
+
+    loc=pos kWhile e=exp kDo x=scopeExpr kOd {
+        fun (a) {assertVoid (a, e (Val) =>> fun (e) {x (Void) => fun (x) {While (e, x)}}, loc)}
+    } |
+
+    loc=pos kDo x=scopeExpr kWhile e=exp kOd {
+        fun (a) {
+            assertVoid(a, x (Void) =>> fun (x) {
+                              e (Val) => fun (e) {
+                                  distributeScope (x, fun (x) { DoWhile (x, e) })
+                              }
+                          }, loc)
+        }
+    } |
+
+    loc=pos kFor x=scopeExpr s[","] e=exp s[","] y=exp kDo loop_exp=scopeExpr kOd {
+        fun (a) {
+            assertVoid(a, x (Void) =>> fun (x) {
+                              e (Val) =>> fun (e)  {
+                                  loop_exp (Void) =>> fun (loop_exp) {
+                                      y (Void) => fun (y) {
+                                        distributeScope (x, fun (s) { Seq (s, While (e, Seq (loop_exp, y))) })
+                                      }
+                                  }
+                              }
+                          }, loc)
+         }
+    } |
+
+    kCase e=exp kOf branches=listBy[branch, s("|")] kEsac {
+        fun (a) {
+            e (Val) =>> fun (e) {
+                chainST (map (fun (br) {br (a)}, branches)) =>> fun (branches) {
+                    freshName => fun (name) {
+                      Scope ({Var ({name})},
+                             Seq (Ignore (Set (name, e)),
+                                  Case (Var (name), reifyPatternBindings(name, branches))))
+                    }
+                }
+            }
+        }
+    } |
+
+    loc=pos kSkip {
+        fun (a) {assertVoid (a, returnST $ Skip, loc)}
+    } |
+
+    loc=pos e=inbr[s("("), scopeExpr, s(")")] {
+        e
+    }),
+  pattern = memo $ eta syntax (
+    p=inbr[s("("), pattern, s(")")] {
+        p
+    } |
+    x=decimal {
+        fun (_) {returnST $ Const (stringInt (x))}
+    } |
+    s["_"] {
+        fun (_) {returnST $ Wildcard}
+    } |
+    elems=inbr[s("["), list0 (syntax (p=pattern {p (Val)})), s("]")] {
+        fun (_) {chainST (elems) => fun (elems) {Array (elems)}}
+    } |
+    t=uident elems=inbr[s("("), list0 (syntax (p=pattern {p (Val)})), s(")")]? {
+        fun (_) {
+            case elems of
+              None -> returnST $ Sexp (t, {})
+            | Some (elems) -> chainST (elems) => fun (elems) {Sexp (t, elems)}
+            esac
+        }
+    } |
+    x=lident s["@"] p=pattern {
+        fun (_) {p (Val) => fun (p) {Named (x, p)}}
+    } |
+    x=lident {
+        fun (_) {returnST $ Named (x, Wildcard)}
+    }),
+  branch = memo $ eta syntax (p=pattern s["->"] x=scopeExpr {
+                                  fun (a) {
+                                      p (Val) =>> fun (p)  {
+                                          x (a)  =>  fun (x) { [p, x] }
+                                      }
+                                  }
+                              }),
+  elif_prs   = memo $ eta syntax (kElif e=exp kThen x=scopeExpr y=elif_prs {
+                                      fun (a) {
+                                          e (Val) =>> fun (e) {
+                                              x (a) =>> fun (x) {
+                                                  y (a) => fun (y) {If (e, x, y)}
+                                              }
+                                          }
+                                      }
+                                  } |
+                                  kElse z=scopeExpr kFi {
+                                      z
+                                  } |
+                                  loc=pos kFi {
+                                      fun (a) {assertVoid (a, returnST $ Skip, loc)}
+                                  }),
   basic = memo $ eta (
     expr ({[Right, {[s (":="), fun (l, loc, r) {
                                  fun (a) {assertValue (a, l (Ref) =>> fun (l) {
