@@ -273,6 +273,45 @@ fun suffix (op) {
   esac
 }
 
+fun binop (left, right, operation) {
+  fun operationType (operation) {
+    case operation of
+        "+"  -> Base
+      | "-"  -> Base
+      | "*"  -> Base
+      | "&&" -> Logical
+      | "!!" -> Logical
+      | "/"  -> Division
+      | "%"  -> Remainder
+      | "<"  -> Compare
+      | "<=" -> Compare
+      | "!=" -> Compare
+      | ">=" -> Compare
+      | ">"  -> Compare
+      | "==" -> Compare
+    esac
+  }
+    
+  case operationType(operation) of
+      Base ->
+        if memOpnd(left) then
+          listBuffer ({ Mov(left, eax), Binop(operation, right, eax), Mov(eax, left) })  
+        else
+          singletonBuffer (Binop(operation, right, left))
+        fi
+    | Division ->
+      listBuffer ({ Mov (left, eax), Cltd, IDiv(right), Mov(eax, left) })
+    | Remainder ->
+      listBuffer ({ Mov (left, eax), Cltd, IDiv(right), Mov(edx, left) })
+    | Compare ->
+      listBuffer ({ Mov (left, eax), Mov (L (0), edx), Binop ("cmp", right, eax), Set (suffix(operation), "%dl"), Mov (edx, left) })
+    | Logical ->
+      listBuffer ({ Mov (left, edx), Binop ("cmp", edx, L (0)), Mov (L (0), eax), Set (suffix("=="), "al"),
+        Mov (right, edx), Binop ("cmp", edx, L (0)), Mov (L (0), edx), Set (suffix("=="), "dl"),
+        Binop (operation, edx, eax), Mov (eax, left) })
+  esac
+}
+
 -- Compiles stack machine code into a list of x86 instructions. Takes an environment
 -- and stack machine code, returns an updated environment and x86 code.
 fun compile (env, code) {
@@ -288,6 +327,22 @@ fun compile (env, code) {
           case env.pop of
             [s, env] -> [env, code <+ Push (s) <+ Call ("Lwrite") <+ Pop (eax)]
           esac
+      | CONST (n) ->
+          case env.allocate of
+            [s, env] -> [env, code <+> move (L (n), s)]
+          esac
+      | LD (x) ->
+          case env.allocate of
+            [s, env] -> [env, code <+> move (env.loc(x), s)]
+          esac
+      | ST (x) ->
+          case env.addGlobal(x).pop of
+            [s, env] -> [env, code <+> move (s, env.loc(x))]
+          esac
+      | BINOP (operation) ->
+          case env.pop2 of
+            [right, left, env] -> [env.push(left), code <+> binop(left, right, operation)]
+          esac  
       | _ -> failure ("codegeneration for instruction %s is not yet implemented\n", i.string)
       esac
     }, [env, emptyBuffer ()], code)
