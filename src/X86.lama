@@ -358,11 +358,11 @@ fun prologue (fLabel) {
 
 -- Generates function epilogue
 fun epilogue (env) {
-  var metaDef = Meta (sprintf ("\t.set\t%s_SIZE,\t%d\n", env.currentFunction, env.staticSize * wordSize));
+  var metaDef = Meta (sprintf ("\t.set\t%s_SIZE,\t%d\n", currentFunction (env), staticSize (env) * wordSize));
 
-  if compare (env.currentFunction, "main") == 0
+  if compare (currentFunction (env), "main") == 0
   then [env, singletonBuffer (Mov (ebp, esp)) <+ Pop (ebp) <+ Binop ("^", eax, eax) <+ Ret <+ metaDef]
-  else case env.pop of
+  else case pop (env) of
          [y, env] -> [env, singletonBuffer (Mov (y, eax)) <+ Mov (ebp, esp) <+ Pop (ebp) <+ Ret <+ metaDef]
        esac
   fi
@@ -416,14 +416,13 @@ fun compile (env, code) {
         var code = scode <+ Meta ("# " ++ showSMInsn (i) ++ "\n");
         case i of
           READ ->
-            case env.allocate of
+            case allocate (env) of
 	      [s, env] -> [env, code <+ Push (edx) <+ Push (ecx) <+ Call ("Lread") <+ Pop (ecx) <+ Pop (edx) <+ Mov (eax, s)]
             esac             
         | WRITE ->
-            case env.pop of
+            case pop (env) of
 	      [s, env] -> [env, code <+ Push (edx) <+ Push (ecx) <+ Push (s) <+ Call ("Lwrite") <+ Pop (eax) <+ Pop (ecx) <+ Pop (edx)]
             esac
-        (* Assignment *)
         
          -- Some guidelines for generating function calls:
          --
@@ -441,10 +440,137 @@ fun compile (env, code) {
          --    env.enterFunction to create a proper environment;
          -- 2. generate epilogue for END instruction.
                
+        | CONST (n) ->
+            case allocate (env) of
+              [s, env] -> [env, code <+> move (L (n), s)]
+            esac
+        | LD (x)    ->
+            case allocate (env) of
+              [s, env] -> [env, code <+> move (loc (env, x), s)]
+            esac
+        | ST (x)    ->
+            [env, code <+> move (peek (env), loc (env, x))]
+        | BINOP (op) ->
+            case pop2 (env) of
+              -- push y here case we want to save a register in case x = S, y = R
+              [x, y, env] -> [push (env, y), code <+> compileBinop (op, y, x)] -- reversing order here
+            esac
+        | STI          ->
+            case pop2 (env) of
+              -- Need to store x on a stack, so Mov (x, y)
+              [x, y, env] -> [push (env, y), code <+ Mov (x, I (0, y)) <+ Mov (x, y)]
+            esac
+        | DROP         -> [pop (env)[1], code]
+        | LABEL (l)    -> [getEnvForLabel (env, l), code <+ Label (l)]
+        | JMP   (l)    -> [setStack (env, l).setBarrier, code <+ Jmp (l)]
+        | CJMP  (c, l) ->
+            case pop (env) of
+              [s, env] -> [setStack (env, l), code <+ Binop ("cmp", L (0), s) <+ CJmp (c, l)]
+            esac
+        | DUP          ->
+            var old_s = peek (env); -- need to do that before env.allocate
+            case allocate (env) of
+              [s, env] -> [env, code <+ Mov (old_s, s)]
+            esac
+        | LDA (x)      ->
+            case allocate (env) of
+              [s, env] -> [env, code <+ Lea (loc (env, x), eax) <+ Mov (eax, s)]
+            esac
+        | END          ->
+            case epilogue (env) of
+              [env, epilogue_code] -> [env, code <+> epilogue_code]
+            esac
+        | GLOBAL (x)   -> [addGlobal (env, x), code]
+        | CALL (fLabel, num_of_args) ->
+            case compileCall (env, fLabel, num_of_args) of
+              [env, call_code] -> [env, code <+> call_code]
+            esac
+        | BEGIN (f, num_of_args, num_of_locals) -> [enterFunction (env, f, num_of_locals), code <+> prologue (f)]
         | _ -> failure ("codegeneration for instruction %s is not yet implemented\n", i.string)
-        (* End *)
         esac
       }, [env, emptyBuffer ()], code)
+  }
+
+  fun getEnvForLabel (env, l) {
+    if isBarrier (env) then retrieveStack (env, l) else env fi
+  }
+
+  fun compileCall (env, fLabel, num_of_args) {
+    var pushRegs = map (fun (r) {Push (r)}, liveRegisters (env, num_of_args));
+    var popRegs = map (fun (r) {Pop (r)}, liveRegisters (env, num_of_args));
+    var pushArgs = {};
+
+    popRegs := reverse (popRegs);
+
+    for var i; i := 0, i < num_of_args, i := i + 1 do
+      case pop (env) of [x, newEnv] ->
+        pushArgs := pushArgs +++ {Push (x)};
+        env := newEnv
+      esac
+    od;
+
+    case allocate (env) of [x, env] ->
+      [env, listBuffer (pushRegs)               <+>
+            listBuffer (pushArgs)               <+
+            Call (fLabel)                       <+
+            Binop ("+", L (wordSize * num_of_args), esp) <+>
+            listBuffer (popRegs)                <+
+            Mov (eax, x)]
+    esac
+  }
+
+  fun compileBinop (op, x, y) {
+    -- Checks if a source operand is sutable for the Binop instruction
+    fun isBinopString (op) {
+      case op of
+        "+"   -> true
+      | "-"   -> true
+      | "*"   -> true
+      | "^"   -> true
+      | _     -> false
+      esac
+    }
+
+    -- emulate logical and/or with != operator
+    fun log (x, y, op) {
+        emptyBuffer ()               <+
+        Binop ("^", eax, eax)        <+
+        Binop ("cmp", x, eax)        <+
+        Set   (suffix ("!="), "%al") <+
+        Binop ("^", edx, edx)        <+
+        Binop ("cmp", y, edx)        <+
+        Set   (suffix ("!="), "%dl") <+
+        Binop (op, edx, eax)
+    }
+
+    if isBinopString (op) then
+      if memOpnd (x) then
+        emptyBuffer () <+ Mov (x, eax) <+ Binop (op, y, eax) <+ Mov (eax, x)
+      else
+        singletonBuffer (Binop (op, y, x))
+      fi
+    else
+      case op of
+        "/" ->
+          -- Fill edx with the sign of eax (Cltd works with eax); Divide value in edx:eax by y; restore answer (eax)
+          emptyBuffer() <+ Mov (x, eax) <+ Cltd <+ IDiv (y) <+ Mov (eax, x)
+      | "%" ->
+          -- everything's the same, except we're returning edx
+          emptyBuffer() <+ Mov (x, eax) <+ Cltd <+ IDiv (y) <+ Mov (edx, x)
+      | "&&" ->
+          log (x, y, op) <+ Mov (eax, x)
+      | "!!" ->
+          log (x, y, op) <+ Mov (eax, x)
+      | _   ->
+          -- comparison
+          emptyBuffer() <+
+          Mov (L (0), eax) <+
+          Mov (x, edx) <+
+          Binop ("cmp", y, edx) <+
+          Set (suffix(op), "%al") <+
+          Mov (eax, x)
+      esac
+    fi
   }
 
   compile (env, code) 
