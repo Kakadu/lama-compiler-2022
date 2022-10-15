@@ -39,6 +39,3 @@ public fun evalBinOperations (operation, leftExpr, rightExpr) {
     | "&&" -> leftExpr && rightExpr
   esac
 }
-Footer
-© 2022 GitHub, Inc.
-Footer navigation

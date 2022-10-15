@@ -306,9 +306,9 @@ fun binop (left, right, operation) {
     | Compare ->
       listBuffer ({ Mov (left, eax), Mov (L (0), edx), Binop ("cmp", right, eax), Set (suffix(operation), "%dl"), Mov (edx, left) })
     | Logical ->
-      listBuffer ({ Mov (left, edx), Binop ("cmp", edx, L (0)), Mov (L (0), eax), Set (suffix("=="), "al"),
-        Mov (right, edx), Binop ("cmp", edx, L (0)), Mov (L (0), edx), Set (suffix("=="), "dl"),
-        Binop (operation, edx, eax), Mov (eax, left) })
+      listBuffer ({ Mov (left, edx), Binop ("&&", edx, edx), Mov (L (0), eax), Set (suffix("!="), "%al"),
+                    Mov (right, edx), Binop ("&&", edx, edx), Mov (L (0), edx), Set (suffix("!="), "%dl"),
+                    Binop (operation, edx, eax), Mov (eax, left) })
   esac
 }
 
@@ -332,7 +332,7 @@ fun compile (env, code) {
             [s, env] -> [env, code <+> move (L (n), s)]
           esac
       | LD (x) ->
-          case env.allocate of
+          case env.addGlobal (x).allocate of
             [s, env] -> [env, code <+> move (env.loc(x), s)]
           esac
       | ST (x) ->
