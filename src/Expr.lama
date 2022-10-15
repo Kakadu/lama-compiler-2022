@@ -101,10 +101,152 @@ fun evalList (c, exprs) {
   esac
 }
 
-fun eval (c@[s, w], expr) {
-  failure ("evalExpr not implemented\n")
+fun remove_var (arr) {
+    map (fun (Var (x)) {x}, arr)
 }
 
+fun wrap_arr (arr) {
+    Var (listArray (remove_var (arr)))
+}
+
+fun match (pattern, v) {
+    case pattern of
+        Wildcard                -> true
+      | Const (n)               -> n == v
+      | Array (pattern_arr)     ->
+        var arr = arrayList (v);
+        if (size (pattern_arr) == size (arr))
+          then foldl (fun (acc, [pattern, v]) {
+                           acc && match (pattern, v)
+                       },
+                       true,
+                       zip (pattern_arr, arr))
+          else false
+        fi
+      | Sexp (x, pattern_arr)   ->
+        case v of Sexp (y, arr) ->
+          if (compare (x, y) == 0)
+            then match (Array (pattern_arr), arr)
+            else false
+          fi
+        esac
+      | Named (_, pattern)      -> match (pattern, v)
+      | _                       -> false
+    esac
+}
+
+fun eval (c@[s, w], expr) {
+  case expr of
+    Assn    (l_expr, r_expr)           ->
+      case evalList (c, {l_expr, r_expr}) of
+        [[s, w], {Ref (x), Var (v)}] -> [[s <- [x, Var (v)], w], Var (v)]
+      | [c,      {ARef (arr, idx), Var (v)}] -> arr[idx] := v; [c, Var (v)]
+      esac
+  | Seq     (l_expr, r_expr)           ->
+      case evalList (c, {l_expr, r_expr}) of
+        [c, {_, v}] -> [c, v]
+      esac
+  | Skip                               -> [c, Void]
+  | If      (expr, if_expr, else_expr) ->
+      case eval (c, expr) of
+        [c, Var (n)] -> if n then eval (c, if_expr) else eval (c, else_expr) fi
+      esac
+  | While   (cond_expr, loop_expr)     ->
+      case eval (c, cond_expr) of
+        [c, Var (n)] -> if n then eval (eval (c, loop_expr)[0], expr) else [c, Void] fi
+      esac
+  | DoWhile (loop_expr, cond_expr)     -> eval (eval (c, loop_expr)[0], While (cond_expr, loop_expr))
+  | Var     (name_of_var)              ->
+      case lookup (s, name_of_var) of
+        Var (x) -> [c, Var (x)]
+      esac
+  | Ref     (name_of_var)              ->
+      [c, Ref (name_of_var)]
+  | Const   (n)                        -> [c, Var (n)]
+  | Binop   (op, l_expr, r_expr)       ->
+      case evalList (c, {l_expr, r_expr}) of
+        [c, {Var (l), Var (r)}] -> [c, Var (evalOp (op, l, r))]
+      esac
+  | Ignore  (expr)                     ->
+      case eval (c, expr) of
+        [c, _] -> [c, Void]
+      esac
+  | Scope   (defs, expr)               ->
+      var new_s = foldl (fun (s, d) {
+                           case d of
+                             Var (names) -> addNames (s, names)
+                           | Val (names) -> addNames (s, names)
+                           | Fun (name, args, body) -> addFunction (s, name, args, body)
+                           esac
+                         },
+                         enterScope (s),
+                         defs);
+
+      case eval ([new_s, w], expr) of
+        [[s, w], v] -> [[leaveScope (s), w], v]
+      esac
+   | Call (name_of_func, args) ->
+      case lookup (s, name_of_func) of
+        Fun (_, External) ->
+          eval (c, Builtin (name_of_func, args))
+      | Fun (names_of_args, body) ->
+          case evalList (c, args) of
+            [c, values_of_args] ->
+              var new_s = foldl (fun (s, [name, arg]) {
+                                   case arg of
+                                     Var (v) -> addName (s, name, Var (v))
+                                   esac
+                                 },
+                                 enterFunction (s),
+                                 zip (names_of_args, values_of_args));
+
+          case eval ([new_s, w], body) of
+            [[new_s, w], Var (v)] -> [[leaveFunction (s, getGlobal (new_s)), w], Var (v)]
+          esac
+        esac
+      esac
+  | Case (scr, branches)   ->
+     case eval (c, scr) of [c, Var (v)] ->
+       case branches of
+         [p, br] : branches ->
+           if (match (p, v))
+             then eval (c, br)
+             else eval (c, Case (scr, branches))
+           fi
+        esac
+     esac
+  | Builtin (name, args) ->
+      case evalList (c, args) of
+        [[s, w], values] ->
+          case evalBuiltin (name, remove_var (values), w) of
+            [value, w] -> [[s, w], Var (value)]
+          esac
+      esac
+  | String (s) -> [c, Var (s)]
+  | Array (exprs) ->
+      case evalList (c, exprs) of
+        [c, vals] -> [c, wrap_arr (vals)]
+      esac
+  | Sexp (tag, exprs) ->
+      case eval (c, Array (exprs)) of
+        [c, Var (arr)] -> [c, Var (Sexp (tag, arr))]
+      esac
+  | Elem (exp1, exp2) ->
+      case evalList (c, {exp1, exp2}) of
+        [c, {Var (Sexp (_, v1)), Var (v2)}] -> [c, Var (v1[v2])]
+      | [c, {Var (v1), Var (v2)}] -> [c, Var (v1[v2])]
+      esac
+  | ElemRef (name_of_arr, idx) ->
+      case evalList(c, {name_of_arr, idx}) of
+        [c, {Var (Sexp(_, arr)), Var (idx)}] -> [c, ARef (arr, idx)]
+      | [c, {Var (arr), Var (idx)}] -> [c, ARef (arr, idx)]
+      esac
+  | Set (name_of_var, exp) ->
+      case eval(c, exp) of
+        [[s, w], Var (v)] -> [[s <- [name_of_var, Var (v)], w], Var (v)]
+      esac
+  esac
+}
 
 -- Evaluates a program with a given input and returns an output
 public fun evalExpr (input, expr) {
