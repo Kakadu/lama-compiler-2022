@@ -94,14 +94,6 @@ fun evalList (c, exprs) {
   esac
 }
 
-public fun evalExpr (st, expr) {
-case expr of
-  Var (v) -> st (v)
-  | Const (c) -> c
-  | Binop (operator, e1, e2) -> evalBinop(operator, evalExpr(st, e1), evalExpr(st, e2))
-esac
-}
-
 public fun evalBinop (op,c1,c2){
   case op of 
       "+" -> c1 + c2
@@ -120,6 +112,78 @@ public fun evalBinop (op,c1,c2){
   esac
 }
 (* End *)
+fun eval (c@[s, w], expr) {
+  case expr of
+      Assn (e1, e2) -> case evalList (c, {e1, e2}) of
+                          [[s, w], {Ref (x), v}] -> 
+                          checkVar (s, x);
+                          [[s <- [x, Var (v)], w], v]
+                       esac
+    | Seq (s1, s2) -> eval (eval (c, s1).fst, s2)
+    | Skip -> [c, Void]
+    | Read (x) ->
+              checkVar (s, x);
+             case readWorld (w) of 
+              [v, nwrld] -> [[s <- [x, Var(v) ], nwrld], Void] 
+             esac
+    | Write (e) -> case eval (c, e) of
+                        [[s, w], v] -> [[s, writeWorld (v, w)], Void]
+                   esac
+    | While (e, body) -> case eval (c, e) of
+                        [c, cond] -> if cond then 
+                                                case eval (c, body) of 
+                                                  [c, Void] -> eval (c, While (e, body)) 
+                                                esac 
+                                              else [c, Void] 
+                                     fi
+                     esac
+    | DoWhile (body, e) -> case eval (c, body) of
+                            [c, Void] -> eval (c, While (e, body))
+                          esac
+    | If (e, s1, s2) -> case eval (c, e) of
+                          [c, cond] -> eval (c, if cond then s1 else s2 fi)
+                        esac
+    | Binop (op, e1, e2) -> case evalList (c, {e1, e2}) of
+                              [c, {l, r}] -> [c, evalOp (op, l, r)]
+                            esac
+    | Var (x) -> 
+      checkVar (s, x);
+      [c, case lookup (s,x) of Var(v) -> v esac]
+    | Ref (x) -> 
+      checkVar (s, x);
+      [c, Ref (x)]
+    | Const (n) -> [c, n]
+    | Ignore (e) -> case eval (c, e) of
+                      [c, _] -> [c, Void]
+                    esac
+    | Scope (defs, expr) ->
+      case eval ([foldl (fun (s, def) { 
+        case def of
+            Var (names) -> addNames (s, names)
+          | Fun (name, params, body) -> addFunction (s, name, params, body)
+        esac
+      }, s.enterScope, defs), w], expr) of
+        [[s, w], v] -> [[leaveScope(s), w], v]
+      esac
+    | Call (f, args) ->
+      checkFun (s, f);
+      case lookup (s, f) of
+        Fun (params, body) ->
+          if args.size != params.size then
+            error (sprintf ("expected %d arguments for function ""%s"", but found %d", params.size, f, args.size), getLoc (f))
+          fi;
+          case evalList (c, args) of
+            [[s, w], args] ->
+              case eval ([foldl (fun (s, [param, arg]) { addName (s, param, Var (arg)) }, s.enterFunction, zip (params, args)), w], 
+              body) of
+                [[s2, nwrld], v] -> [[leaveFunction (s, getGlobal(s2)), nwrld], v]
+              esac
+          esac
+      esac
+    | _ -> failure ("this eval: {%s} is not yet implemented\n", expr.string)
+  esac
+}
+
 
 -- Evaluates a program with a given input and returns an output
 public fun evalExpr (input, expr) {
