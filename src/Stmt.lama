@@ -21,7 +21,7 @@ import World;
 
 fun eval (c@[st,wrld], stmt) {
   case stmt of
-   Assn (s, e)-> [st<- [s, evalExpr(st, e)], wrld]
+   Assn (s, expr)-> [st<- [s, evalExpr(st, expr)], wrld]
   | Seq (stmt1, stmt2)-> eval(eval(c, stmt1), stmt2)
   | Skip -> c
   | Read (s) ->
@@ -29,7 +29,26 @@ fun eval (c@[st,wrld], stmt) {
              readWorld (wrld) of 
              [v, nwrld] -> [st <- [s, v], nwrld] 
              esac
-  | Write (e) -> [st, writeWorld (evalExpr (st, e), wrld)]
+  | Write (expr) -> [st, writeWorld (evalExpr (st, expr), wrld)]
+  | While (expr, stmt) -> 
+    while case c of [st, wrld] -> evalExpr(st, expr) esac
+    do
+      c := eval(c, stmt)
+    od;
+    c
+  | DoWhile (stmt, expr) ->
+    do
+      c := eval(c, stmt)
+    while 
+      case c of [st, wrld] -> evalExpr(st, expr) esac
+    od;
+    c
+  | If (expr, stmt1, stmt2) -> 
+    if evalExpr (st, expr) then 
+      eval(c, stmt1)
+    else 
+      eval (c, stmt2)
+    fi
   esac
 }
 
