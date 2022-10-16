@@ -464,6 +464,14 @@ fun toFixedNum (r) {
   singletonBuffer (Sal1 (r)) <+ Or1 (r)
 }
 
+fun compileCmp (x,y,s,op){
+  move(y, eax) <+ Binop("cmp", x, eax) <+> move(L(0), eax) <+ Set(suffix(op), "%al") <+> move(eax,s)
+}
+
+fun compileLogic(x,y,s,op){
+  compileCmp(L(0), y, y, "!=") <+> compileCmp(L(0), x, x, "!=") <+> move (y, eax) <+ Binop(op, x, eax) <+> move(eax,s)
+}
+
 fun compileBinopX86(x,y,s,op) {
   case op of 
       "+" -> move(y, eax) <+ Binop(op, x, eax) <+> move(eax, s)
@@ -471,14 +479,14 @@ fun compileBinopX86(x,y,s,op) {
     | "*" -> move(y, eax) <+ Binop(op, x, eax) <+> move(eax, s)
     | "/" -> move(y, eax) <+ Cltd <+ IDiv(x) <+> move(eax,s)
     | "%" -> move(y, eax) <+ Cltd <+ IDiv(x) <+> move(edx,s)
-    | "==" -> move(y, eax) <+ Binop("cmp", x, eax)<+> move(L(0), eax) <+ Set(suffix(op), "%al") <+> move(eax,s)
-    | "!=" -> move(y, eax) <+ Binop("cmp", x, eax)<+> move(L(0), eax) <+ Set(suffix(op), "%al") <+> move(eax,s)
-    | "<" -> move(y, eax) <+ Binop("cmp", x, eax)<+> move(L(0), eax) <+ Set(suffix(op), "%al") <+> move(eax,s)
-    | "<=" -> move(y, eax) <+ Binop("cmp", x, eax)<+> move(L(0), eax) <+ Set(suffix(op), "%al") <+> move(eax,s)
-    | ">" -> move(y, eax) <+ Binop("cmp", x, eax)<+> move(L(0), eax) <+ Set(suffix(op), "%al") <+> move(eax,s)
-    | ">=" -> move(y, eax) <+ Binop("cmp", x, eax)<+> move(L(0), eax) <+ Set(suffix(op), "%al") <+> move(eax,s)
-    | "&&" -> emptyBuffer()
-    | "!!" -> emptyBuffer()
+    | "==" -> compileCmp (x,y,s,op)
+    | "!=" -> compileCmp (x,y,s,op)
+    | "<" -> compileCmp (x,y,s,op)
+    | "<=" -> compileCmp (x,y,s,op)
+    | ">" -> compileCmp (x,y,s,op)
+    | ">=" -> compileCmp (x,y,s,op)
+    | "&&" -> compileLogic(x,y,s,op)
+    | "!!" -> compileLogic(x,y,s,op)
   esac
 }
 
@@ -499,6 +507,41 @@ fun compile (env, code) {
             case env.pop of
               [s, env] -> [env, code <+ Push (s) <+ Call ("Lwrite") <+ Pop (eax)]
             esac
+        | CONST (c) -> 
+          case allocate(env) of
+            [s, env] -> [env, code <+> move(L(c), s)]
+          esac
+        | LD (x) -> 
+            case allocate(env) of
+              [s, env] -> [env, code <+> move(loc(env, x), s)]
+            esac
+        | LDA (x) ->
+            case env.allocate of
+              [s, env] -> [env, code <+ Lea (env.loc (x), eax) <+> move (eax, s)]
+            esac
+        | ST (x) -> [env, code <+> move (env.peek, env.loc (x))]
+        | STI ->
+            case pop2(env) of
+              [v, x, env] -> [push(env, v), code <+> move (v, I (0, x))]
+            esac
+        | BINOP (op) ->
+            case pop2(env) of
+              [x,y,env] -> 
+                case allocate(env) of
+                  [s, env] -> [env, code <+> compileBinopX86(x,y,s,op)]
+                esac
+            esac
+        | CJMP (cond, lab) ->
+          case pop(env) of
+            [s, env] -> [env.setStack(lab), code <+> move (s, eax) <+ Binop ("&&", eax, eax) <+ CJmp(cond, lab)]
+          esac
+        | JMP (lab) -> [setBarrier(setStack (env, lab)), code <+ Jmp (lab)]
+        | LABEL(lab) -> [if isBarrier(env) then retrieveStack (env, lab) else env fi, code <+ Label (lab)]
+        | DROP ->
+        case env.pop of
+          [_, env] -> [env, code]
+        esac
+        (* Assignment *)
         
          -- Some guidelines for generating function calls:
          --
@@ -510,20 +553,52 @@ fun compile (env, code) {
          -- 4. discard the actual parameters from the stack;
          -- 5. restore saved live registers.
          --
+        | CALL (f, nArgs) ->
+            var liveRegs = liveRegisters (env, nArgs);
+            var pushLiveRegs = listBuffer (map (fun (reg) { Push (reg) }, liveRegs));
+            var popLiveRegs = listBuffer (reverse (map (fun (reg) { Pop (reg) }, liveRegs)));
+            fun pushArgs (env, n) {
+              fun helper (env, n, prefix) {
+                if n == 0 then [env, prefix]
+                  else case pop (env) of
+                    [s, env] -> helper (env, n - 1, prefix <+ Push (s))
+                  esac
+                fi
+              }
+              helper (env, n, emptyBuffer ())
+            }
+            case pushArgs (env, nArgs) of
+              [env, pushArgs] ->
+                case allocate (env) of
+                  [s, env] -> [env,
+                    code
+                      <+> pushLiveRegs
+                      <+> pushArgs
+                      <+ Call (f)
+                      <+ Binop ("+", L (nArgs * wordSize), esp)
+                      <+> popLiveRegs
+                      <+> move (eax, s)
+                  ]
+                esac
+            esac
+
          -- Some guidelines for generating functions:
          --
          -- 1. generate proper prologue for BEGIN instruction (use "prologue" helper); use
          --    env.enterFunction to create a proper environment;
          -- 2. generate epilogue for END instruction.
-               
+          | BEGIN (f, nParams, nLocals) -> [enterFunction (env, f, nLocals), code <+> prologue (f)]
+          | END ->
+            case epilogue (env) of 
+              [env, epilogueCode] -> [env, code <+> epilogueCode]
+            esac
+          | GLOBAL (x) -> [addGlobal (env, x), code]       
         | _ -> failure ("codegeneration for instruction %s is not yet implemented\n", i.string)
         esac
       }, [env, emptyBuffer ()], code)
   }
-
   compile (env, code) 
 }
-
 -- A top-level codegeneration function. Takes a driver's environment and a stack machine program,
 -- compiles the program into machine code, and compiles the machine code into an executable
 public fun compileX86 (args, code) {
@@ -547,3 +622,4 @@ public fun compileX86 (args, code) {
        system ({"gcc -g -m32 -o ", args.getBaseName, " ", runtime, " ", asmFile}.stringcat)
   esac
 }
+
