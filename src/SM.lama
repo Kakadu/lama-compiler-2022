@@ -6,6 +6,7 @@ import State;
 import Expr;
 import Buffer;
 import Fun;
+import Collection;
 
 -- Stack code printer. Takes a list of SM instructions, return its
 -- string representation.
@@ -24,10 +25,51 @@ public fun showSM (prg) {
   map (fun (i) {showSMInsn (i) ++ "\n"}, prg).stringcat
 }
 
+fun binOp (op1, op2, sign) {
+  case sign of 
+    "+"  -> infix +  
+  | "-"  -> infix -  
+  | "*"  -> infix *  
+  | "/"  -> infix /  
+  | "%"  -> infix %  
+  | "==" -> infix == 
+  | "!=" -> infix != 
+  | "<"  -> infix <  
+  | "<=" -> infix <= 
+  | ">"  -> infix >  
+  | ">=" -> infix >= 
+  | "&&" -> infix && 
+  | "!!" -> infix !! 
+  esac (op1, op2)
+}
+
 -- Stack machine interpreter. Takes an SM-configuration and a program,
 -- returns a final configuration
 fun eval (c, insns) {
-  failure ("SM eval not implemented\n")
+  foldl(
+    fun (c@[mem, st, w], insn) {
+      case insn of
+          READ ->  
+        case readWorld (w) of 
+          [v, nw] -> [v : mem, st, nw]
+        esac
+        | WRITE -> 
+        case mem of 
+          v : nmem -> 
+          [nmem, st, writeWorld (v, w)]
+        esac
+        | BINOP (s) -> 
+        case mem of 
+          op2 : op1 : nmem -> [binOp (op1, op2, s) : nmem, st, w]
+        esac 
+        | LD (x) -> [st (x) : mem, st, w]
+        | ST (x) ->
+        case mem of 
+          v : nmem -> [nmem, st <- [x, v], w]
+        esac
+        | CONST (n) -> [n : mem, st, w]
+      esac
+    }, c, insns)
 }
 
 -- Runs a stack machine for a given input and a given program, returns an output
@@ -39,12 +81,22 @@ public fun evalSM (input, insns) {
 -- Takes an expression, returns a list 
 -- of stack machine instructions
 fun compileExpr (expr) {
-  failure ("compileExpr not implemented\n")
+  case expr of 
+    Var (v) -> { LD (v) }
+  | Const (n) -> { CONST (n) }
+  | Binop (op, l, r) -> compileExpr (l) +++ compileExpr (r) +++ { BINOP (op) }
+  esac
 }
 
 -- Compiles a statement into a stack machine code.
 -- Takes a statement, returns a list of stack machine
 -- instructions.
 public fun compileSM (stmt) {
-  failure ("compileSM not implemented\n")
+  case stmt of
+    Assn (x, expr) -> compileExpr (expr) +++ { ST (x) }
+  | Seq (stmt1, stmt2) -> compileSM (stmt1) +++ compileSM (stmt2)
+  | Skip -> {}
+  | Read (x) -> READ : { ST (x) }
+  | Write (e) -> compileExpr (e) +++ { WRITE }
+  esac
 }
