@@ -27,4 +27,4 @@ variate:
 
 clean:
 	rm -Rf *.s *.o *.i *~ *.html *.sm lama-impl
-	
+
