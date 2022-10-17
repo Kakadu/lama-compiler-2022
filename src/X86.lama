@@ -273,6 +273,40 @@ fun suffix (op) {
   esac
 }
 
+fun compileBinopX86(expr1, expr2, s, op) {
+  fun compileArithm() {
+    move(expr2, eax) <+ Binop(op, expr1, eax) <+> move(eax, s)
+  }
+
+  fun compileDiv(reg) {
+    move(expr2, eax) <+ Cltd <+ IDiv(expr1) <+> move(reg, s)
+  }
+
+  fun compileCmp(expr1, expr2, s, op) {
+    move(expr2, eax) <+ Binop("cmp", expr1, eax) <+> move(L(0), eax) <+ Set(suffix(op), "%al") <+> move(eax, s)
+  }
+
+  fun compileLogic() {
+    compileCmp(L(0), expr2, expr2, "!=") <+> compileCmp(L(0), expr1, expr1, "!=") <+> move (expr2, eax) <+ Binop(op, expr1, eax) <+> move(eax,s)
+  }
+
+  case op of
+    "+"    -> compileArithm()
+    | "-"  -> compileArithm()
+    | "*"  -> compileArithm()
+    | "/"  -> compileDiv(eax)
+    | "%"  -> compileDiv(edx)
+    | "==" -> compileCmp(expr1, expr2, s, op)
+    | "!=" -> compileCmp(expr1, expr2, s, op)
+    | "<"  -> compileCmp(expr1, expr2, s, op)
+    | "<=" -> compileCmp(expr1, expr2, s, op)
+    | ">"  -> compileCmp(expr1, expr2, s, op)
+    | ">=" -> compileCmp(expr1, expr2, s, op)
+    | "&&" -> compileLogic()
+    | "!!" -> compileLogic()
+  esac
+}
+
 -- Compiles stack machine code into a list of x86 instructions. Takes an environment
 -- and stack machine code, returns an updated environment and x86 code.
 fun compile (env, code) {
@@ -280,15 +314,13 @@ fun compile (env, code) {
     fun ([env, scode], i) {
       var code = scode <+ Meta ("# " ++ showSMInsn (i) ++ "\n");
       case i of
-        READ ->
-          case env.allocate of
-            [s, env] -> [env, code <+ Call ("Lread") <+ Mov (eax, s)]
-          esac             
-      | WRITE ->
-          case env.pop of
-            [s, env] -> [env, code <+ Push (s) <+ Call ("Lwrite") <+ Pop (eax)]
-          esac
-      | _ -> failure ("codegeneration for instruction %s is not yet implemented\n", i.string)
+        READ         -> case env.allocate of [s, env] -> [env, code <+ Call("Lread") <+ Mov(eax, s)] esac
+        | WRITE      -> case env.pop of [s, env] -> [env, code <+ Push(s) <+ Call("Lwrite") <+ Pop(eax)] esac
+        | CONST (x)  -> case env.allocate of [s, env] -> [env, code <+> move(L(x), s)] esac
+        | LD (x)     -> case env.allocate of [s, env] -> [env, code <+> move(env.loc(x), s)] esac
+        | ST (x)     -> case env.addGlobal(x).pop of [s, env] -> [env, code <+> move(s, env.loc(x))] esac
+        | BINOP (op) -> case env.pop2 of [expr1, expr2, env] -> case env.allocate of [s, env] -> [env, code <+> compileBinopX86(expr1, expr2, s, op)] esac esac
+        | _          -> failure("codegeneration for instruction %s is not yet implemented\n", i.string)
       esac
     }, [env, emptyBuffer ()], code)
 }
