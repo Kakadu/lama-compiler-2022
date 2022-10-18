@@ -306,6 +306,18 @@ fun compile (env, code) {
                 | ">=" -> move (L (0), eax) <+> move (expr1, edx) <+ Binop ("cmp", expr2, edx) <+ Set (suffix (op), "%al") <+> move (eax, expr1)
                 | "==" -> move (L (0), eax) <+> move (expr1, edx) <+ Binop ("cmp", expr2, edx) <+ Set (suffix (op), "%al") <+> move (eax, expr1)
                 | "!=" -> move (L (0), eax) <+> move (expr1, edx) <+ Binop ("cmp", expr2, edx) <+ Set (suffix (op), "%al") <+> move (eax, expr1)
+                | "&&" -> (
+                    var expr1_is_not_zero = move (L (0), eax) <+ Binop ("cmp", eax, expr1) <+ Set (suffix ("!="), "%al") <+> move (eax, expr1);
+                    var expr2_is_not_zero = move (L (0), eax) <+ Binop ("cmp", eax, expr2) <+ Set (suffix ("!="), "%al") <+> move (eax, expr2);
+
+                    expr1_is_not_zero <+> expr2_is_not_zero <+> move (expr1, eax) <+ Binop (op, expr2, eax) <+> move (eax, expr1)
+                          )
+                | "!!" -> (
+                    var expr1_is_not_zero = move (L (0), eax) <+ Binop ("cmp", eax, expr1) <+ Set (suffix ("!="), "%al") <+> move (eax, expr1);
+                    var expr2_is_not_zero = move (L (0), eax) <+ Binop ("cmp", eax, expr2) <+ Set (suffix ("!="), "%al") <+> move (eax, expr2);
+
+                    expr1_is_not_zero <+> expr2_is_not_zero <+> move (expr1, eax) <+ Binop (op, expr2, eax) <+> move (eax, expr1)
+                          )
               esac
             ]
           esac

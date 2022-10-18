@@ -20,6 +20,8 @@ public fun evalBinop (op, expr1, expr2) {
     | ">=" -> expr1 >= expr2
     | "==" -> expr1 == expr2
     | "!=" -> expr1 != expr2
+    | "&&" -> expr1 && expr2
+    | "!!" -> expr1 !! expr2
     | _    -> failure("Unsupported operation!")
   esac
 }
