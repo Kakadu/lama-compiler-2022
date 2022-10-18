@@ -65,7 +65,7 @@ fun insnString (insn) {
   fun opndString (opnd) {
     case opnd of
       R (i) -> regs [i]
-    | S (i) -> sprintf ("-%d(%%ebp)", (i+1) * wordSize)
+    | S (i) -> sprintf ("-%d(%%ebp)", (i + 1) * wordSize)
     | M (x) -> x
     | L (i) -> sprintf ("$%d", i)
     esac
@@ -109,8 +109,8 @@ fun makeEnv (stack, stackSlots, globals) {
     case 
       case stack of
         {}        -> [ebx, 0]
-      | S (n) : _ -> [S (n+1), n+2]
-      | R (n) : _ -> if n < nRegs then [R (n+1), stackSlots] else [S (0), 1] fi
+      | S (n) : _ -> [S (n + 1), n + 2]
+      | R (n) : _ -> if n < nRegs then [R (n + 1), stackSlots] else [S (0), 1] fi
       | _         -> [S (0), 1]
       esac
     of [x, n] -> [x, makeEnv (x : stack, if n > stackSlots then n else stackSlots fi, globals)]esac
@@ -283,60 +283,69 @@ fun compile (env, code) {
           case env.allocate of
             [s, env] -> [env, code <+ Call ("Lread") <+ Mov (eax, s)]
           esac             
-      | WRITE ->
+        | WRITE ->
           case env.pop of
             [s, env] -> [env, code <+ Push (s) <+ Call ("Lwrite") <+ Pop (eax)]
           esac
-      | CONST (n) ->
+        | CONST (n) ->
           case env.allocate of
-            [s, env] -> [env, code <+> move(L(n), s)]
+            [s, env] -> [env, code <+> move (L (n), s)]
           esac
-      | LD (x)    ->
-          case env.addGlobal(x).allocate of
-            [s, env] -> [env, code <+> move(env.loc(x), s)]
-          esac
-      | ST(x)     ->
-          case env.addGlobal(x).pop of
-            [s, env] -> [env, code <+> move(s, env.loc(x))]
-          esac
-      | BINOP(op) ->
+        | BINOP (op)    ->
           case env.pop2 of
-            [y, x, env] -> [env.push(y), code <+>
+            [expr2, expr1, env] -> [env.push (expr1), code <+>
               case op of
-                "+"    -> move(x, eax) <+ Binop(op, y, eax) <+> move(eax, y)
-                | "-"  -> move(x, eax) <+ Binop(op, y, eax) <+> move(eax, y)
-                | "*"  -> move(x, eax) <+ Binop(op, y, eax) <+> move(eax, y)
-                | "/"  -> move(x, eax) <+ Cltd <+ IDiv(y) <+> move(eax, y)
-                | "%"  -> move(x, eax) <+ Cltd <+ IDiv(y) <+> move(edx, y)
-                | "<"  -> singletonBuffer(Binop("cmp", y, x)) <+ Set(suffix(op), "%al") <+> move(eax, y)
-                | ">"  -> singletonBuffer(Binop("cmp", y, x)) <+ Set(suffix(op), "%al") <+> move(eax, y)
-                | "<=" -> singletonBuffer(Binop("cmp", y, x)) <+ Set(suffix(op), "%al") <+> move(eax, y)
-                | ">=" -> singletonBuffer(Binop("cmp", y, x)) <+ Set(suffix(op), "%al") <+> move(eax, y)
-                | "==" -> singletonBuffer(Binop("cmp", y, x)) <+ Set(suffix(op), "%al") <+> move(eax, y)
-                | "!=" -> singletonBuffer(Binop("cmp", y, x)) <+ Set(suffix(op), "%al") <+> move(eax, y)
+                "+"    -> move (expr1, eax) <+ Binop (op, expr2, eax) <+> move (eax, expr1)
+                | "-"  -> move (expr1, eax) <+ Binop (op, expr2, eax) <+> move (eax, expr1)
+                | "*"  -> move (expr1, eax) <+ Binop (op, expr2, eax) <+> move (eax, expr1)
+                | "/"  -> move (expr1, eax) <+ Cltd <+ IDiv(expr2) <+> move (eax, expr1)
+                | "%"  -> move (expr1, eax) <+ Cltd <+ IDiv(expr2) <+> move (edx, expr1)
+                | "<"  -> move (L (0), eax) <+> move (expr1, edx) <+ Binop ("cmp", expr2, edx) <+ Set (suffix (op), "%al") <+> move (eax, expr1)
+                | ">"  -> move (L (0), eax) <+> move (expr1, edx) <+ Binop ("cmp", expr2, edx) <+ Set (suffix (op), "%al") <+> move (eax, expr1)
+                | "<=" -> move (L (0), eax) <+> move (expr1, edx) <+ Binop ("cmp", expr2, edx) <+ Set (suffix (op), "%al") <+> move (eax, expr1)
+                | ">=" -> move (L (0), eax) <+> move (expr1, edx) <+ Binop ("cmp", expr2, edx) <+ Set (suffix (op), "%al") <+> move (eax, expr1)
+                | "==" -> move (L (0), eax) <+> move (expr1, edx) <+ Binop ("cmp", expr2, edx) <+ Set (suffix (op), "%al") <+> move (eax, expr1)
+                | "!=" -> move (L (0), eax) <+> move (expr1, edx) <+ Binop ("cmp", expr2, edx) <+ Set (suffix (op), "%al") <+> move (eax, expr1)
               esac
             ]
           esac
-      | _ -> failure ("codegeneration for instruction %s is not yet implemented\n", i.string)
+        | LD (x)    ->
+          case env.addGlobal(x).allocate of
+            [s, env] -> [env, code <+> move (env.loc (x), s)]
+          esac
+        | ST (x)     ->
+          case env.addGlobal(x).pop of
+            [s, env] -> [env, code <+> move (s, env.loc (x))]
+          esac
+        | _ -> failure ("Unexpected instruction!")
       esac
     }, [env, emptyBuffer ()], code)
 }
 
 -- A top-level codegeneration function. Takes a driver's environment and a stack machine program,
--- compiles the program into machine code, and compiles the machine code into an executable
+-- and returns x86 listing as a string
 public fun compileX86 (args, code) {
   case compile (initEnv (), code) of
     [env, code] ->
-       map (insnString, 
-            getBuffer $
-              singletonBuffer (Meta ("\t.global\tmain\n")) <+>
-              dataSection (listBuffer $ map (dataDef, getGlobals (env))) <+>
-              codeSection (
-                singletonBuffer (Meta ("main:\n")) <+>
+      var asmFile = args.getBaseName ++ ".s",
+          runtime = case getEnv ("LAMA_RUNTIME") of
+          #val   -> "../runtime/"
+          | path -> path
+        esac ++ "/runtime.o";
+
+      fwrite (asmFile,
+        map (insnString,
+          getBuffer $
+            singletonBuffer (Meta ("\t.global\tmain\n")) <+>
+            dataSection (listBuffer $ map (dataDef, getGlobals (env))) <+>
+            codeSection (
+              singletonBuffer (Meta ("main:\n")) <+>
                 prologue (getStackSize (env)) <+>
                 code <+>
                 epilogue ()
-              )
-           ).stringcat
+            )
+        ).stringcat);
+
+      system ({ "gcc -g -m32 -o ", args.getBaseName, " ", runtime, " ", asmFile }.stringcat)
   esac
 }
