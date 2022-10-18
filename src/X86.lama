@@ -273,6 +273,50 @@ fun suffix (op) {
   esac
 }
 
+fun binopType (binop) {
+  case binop of
+    "+"  -> SimpleBinop
+  | "-"  -> SimpleBinop
+  | "*"  -> SimpleBinop
+  | "/"  -> DivBinop
+  | "%"  -> DivBinop
+  | "<"  -> CompBinop
+  | "<=" -> CompBinop
+  | "!=" -> CompBinop
+  | ">=" -> CompBinop
+  | ">"  -> CompBinop
+  | "==" -> CompBinop
+  | "&&" -> LogicBinop
+  | "!!" -> LogicBinop
+  esac
+}
+
+fun divResultingRegister(binop) {
+  case binop of
+    "/" -> eax
+  | "%" -> edx
+  esac
+}
+
+fun binopCode (l, r, binop) {
+  case binopType(binop) of
+    SimpleBinop ->
+      if memOpnd(l) then
+        listBuffer ({Mov(l, eax), Binop(binop, r, eax), Mov(eax, l)})
+      else
+        singletonBuffer (Binop(binop, r, l))
+      fi
+  | DivBinop    ->
+      listBuffer ({Mov (l, eax), Cltd, IDiv(r), Mov(divResultingRegister(binop), l)})
+  | CompBinop   ->
+      listBuffer ({Mov (l, eax), Mov (L (0), edx), Binop ("cmp", r, eax), Set (suffix(binop), "%dl"), Mov (edx, l)})
+  | LogicBinop  ->
+    listBuffer ({Mov (l, edx), Binop ("&&", edx, edx), Mov (L (0), eax), Set (suffix("!="), "%al"),
+                 Mov (r, edx), Binop ("&&", edx, edx), Mov (L (0), edx), Set (suffix("!="), "%dl"),
+                 Binop (binop, edx, eax), Mov (eax, l)})
+  esac
+}
+
 -- Compiles stack machine code into a list of x86 instructions. Takes an environment
 -- and stack machine code, returns an updated environment and x86 code.
 fun compile (env, code) {
@@ -287,6 +331,22 @@ fun compile (env, code) {
       | WRITE ->
           case env.pop of
             [s, env] -> [env, code <+ Push (s) <+ Call ("Lwrite") <+ Pop (eax)]
+          esac
+      | CONST (n) ->
+          case env.allocate of
+            [s, env] -> [env, code <+> move (L (n), s)]
+          esac
+      | LD (x) ->
+          case env.allocate of
+            [s, env] -> [env, code <+> move (env.loc(x), s)]
+          esac
+      | ST (x) ->
+          case env.addGlobal(x).pop of
+            [s, env] -> [env, code <+> move (s, env.loc(x))]
+          esac
+      | BINOP(op) ->
+          case env.pop2 of
+            [r, l, env] -> [env.push(l), code <+> binopCode(l, r, op)]
           esac
       | _ -> failure ("codegeneration for instruction %s is not yet implemented\n", i.string)
       esac
