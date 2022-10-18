@@ -274,23 +274,15 @@ fun suffix (op) {
 }
 
 fun compileBinop(op, x, y, env, code, s) {
-  fun movXIfBothOnStack () {
-    if stackOpnd (x) && stackOpnd (y) then
-      code := code <+ Mov (x, edx); edx
-    else
-      x
-    fi
-  }
-
   fun compileArithmetic (op) {
-    code <+ Binop (op, movXIfBothOnStack (), y) <+> move (y, s)
+    code <+ Mov (y, edx) <+ Binop (op, x, edx) <+ Mov (edx, s)
   }
 
   var cmp = "cmp", al = "%al", dl = "%dl";
   fun zeroReg (r) { Binop ("^", r, r) }
 
   fun compileComparison (op) {
-    code <+ zeroReg (eax) <+ Binop (cmp, movXIfBothOnStack (), y)
+    code <+ zeroReg (eax) <+ Mov (y, edx) <+ Binop (cmp, x, edx)
       <+ Set (suffix (op), al) <+ Mov (eax, s)
   }
 
@@ -299,11 +291,11 @@ fun compileBinop(op, x, y, env, code, s) {
   }
 
   fun compileLogical (op) {
-    fun reduceVarToBin (r32, r8, variable) {
-      listBuffer ({zeroReg (r32), Binop (cmp, variable, r32), Set (suffix ("ne"), r8)})
+    fun reduceValToBin (r32, r8, value) {
+      listBuffer ({zeroReg (r32), Binop (cmp, value, r32), Set (suffix ("!="), r8)})
     }
-    code <+> reduceVarToBin (eax, al, x) <+> reduceVarToBin (edx, dl, y)
-      <+ Binop (op, eax, edx) <+ Mov (edx, s)
+    code <+> reduceValToBin (eax, al, x) <+> reduceValToBin (edx, dl, y)
+         <+ Binop (op, eax, edx) <+ Mov (edx, s)
   }
 
   fun compileOp () {
