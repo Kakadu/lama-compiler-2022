@@ -7,7 +7,7 @@ import State;
 -- The evaluator itself: takes a state and an expression,
 -- returns integer value
 
-public fun evalBinop(op, expr1, expr2) {
+public fun evalBinop (op, expr1, expr2) {
   case op of 
     "+"    -> expr1 + expr2
     | "-"  -> expr1 - expr2
