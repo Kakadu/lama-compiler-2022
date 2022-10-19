@@ -275,34 +275,46 @@ fun suffix (op) {
 
 fun compileBinop (op, l, r) {
   fun compileBasicOp (op, l, r) {
-    if stackOpnd(l) && stackOpnd(r) then
-      emptyBuffer() <+ Mov (r, edi)
-                    <+ Binop (op, l, edi) <+ Mov (edi, r)
-    else
-      emptyBuffer() <+ Binop (op, l, r)
-    fi
+      emptyBuffer() <+ Mov (l, eax)
+                    <+ Binop (op, r, eax)
+                    <+ Mov (eax, l)
   }
 
   fun compileCompareOp (op, l, r) {
-    emptyBuffer() <+ Mov (l, edi) <+ Mov (r, esi)
-                  <+ Binop ("cmp", edi, esi)
-                  <+ Mov (L (0), ebx)
-                  <+ Set (suffix(op), "%bl") <+ Mov (ebx, r)
+    emptyBuffer() <+ Mov (l, edi)
+                  <+ Binop ("cmp", r, edi)
+                  <+ Mov (L (0), eax)
+                  <+ Set (suffix(op), "%al") <+ Mov (eax, l)
   }
 
   fun compileDivOp (op, l, r) {
-     var buf = emptyBuffer() <+ Mov (l, edi) <+ Mov (r, eax) <+ Cltd
+     var buf = emptyBuffer() <+ Mov (r, edi) <+ Mov (l, eax) <+ Cltd
                              <+ IDiv (edi);
 
     case op of
-      "/" -> buf <+ Mov (eax, r)
-    | "%" -> buf <+ Mov (edx, r)
+      "/" -> buf <+ Mov (eax, l)
+    | "%" -> buf <+ Mov (edx, l)
     esac
+  }
+
+  fun compileLogicOp (op, l, r) {
+    emptyBuffer() <+ Mov (l, edx)
+                  <+ Mov (L(0), eax)
+                  <+ Binop ("cmp", edx, eax)
+                  <+ Set (suffix("!="), "%al")
+                  <+ Push (eax)
+                  <+ Mov (r, edx)
+                  <+ Mov (L (0), eax)
+                  <+ Binop ("cmp", edx, eax)
+                  <+ Mov (L(0), edx)
+                  <+ Set (suffix("!="), "%dl")
+                  <+ Pop (eax)
+                  <+ Binop (op, edx, eax)
+                  <+ Mov (eax, l)
   }
 
   case op of
     "*"   -> compileBasicOp(op, l, r)
-  | "/"   -> compileDivOp(op, l, r)
   | "+"   -> compileBasicOp(op, l, r)
   | "-"   -> compileBasicOp(op, l, r)
   | ">"   -> compileCompareOp(op, l, r)
@@ -312,6 +324,9 @@ fun compileBinop (op, l, r) {
   | "=="  -> compileCompareOp(op, l, r)
   | "!="  -> compileCompareOp(op, l, r)
   | "%"   -> compileDivOp(op, l, r)
+  | "/"   -> compileDivOp(op, l, r)
+  | "&&"  -> compileLogicOp(op, l, r)
+  | "!!"  -> compileLogicOp(op, l, r)
   | _ -> failure ("Binop evaluation error: unknown operator")
   esac
 }
@@ -345,7 +360,7 @@ fun compile (env, code) {
           esac
       | BINOP (op) ->
           case env.pop2 of
-            [l, r, env] -> [env.push(r), code <+> compileBinop(op, l, r)]
+            [r, l, env] -> [env.push(l), code <+> compileBinop(op, l, r)]
           esac
       esac
     }, [env, emptyBuffer ()], getBuffer(code))
