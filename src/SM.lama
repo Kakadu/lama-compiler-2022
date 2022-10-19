@@ -26,44 +26,36 @@ public fun showSM (prg) {
 
 -- Stack machine interpreter. Takes an SM-configuration and a program,
 -- returns a final configuration
-fun eval (c, insns) {
-  foldl(evalSingleInstruction, c, insns)
-}
-
-fun evalSingleInstruction([stack, state, world], insn) {
-  case insn of
-    READ -> 
-      var readResult = readWorld(world);
-      var value = readResult[0];
-      var newWorld = readResult[1];
-      [value:stack, state, newWorld]
-  | WRITE -> 
-      [stack.tl, state, writeWorld(stack.hd, world)]
-  | BINOP (op) ->
-      var right = stack.hd;
-      var left = stack.tl.hd;
-      [binopEvaluator(op)(left, right):stack.tl.tl, state, world]
-  | LD (name) -> 
-      [state(name):stack, state, world]
-  | ST (name) -> 
-      [stack.tl, state <- [name, stack.hd], world]
-  | CONST (n) -> 
-      [n:stack, state, world]
+fun eval ([stack, st, w], insns) {
+  case insns of
+    {}          -> [stack, st, w]
+  | ins : insns -> eval (
+    case ins of
+      LD (x)     -> [st (x) : stack, st, w]
+    | CONST (n)  -> [n : stack, st, w]
+    | BINOP (op) -> case stack of h : m : stack -> [binopEvaluator (op) (m, h) : stack, st, w] esac
+    | ST (x)     -> case stack of h : stack -> [stack, st <- [x, h], w] esac
+    | READ       -> case readWorld (w) of [n, w] -> [n : stack, st, w] esac
+    | WRITE      -> case stack of h : stack -> [stack, st, writeWorld (h, w)] esac
+    esac,
+    insns
+    )
   esac
 }
 
 -- Runs a stack machine for a given input and a given program, returns an output
 public fun evalSM (input, insns) {
-  eval ([{}, emptyState, createWorld (input)], getBuffer(insns))[2].getOutput
+  eval ([{}, emptyState, createWorld (input)], insns)[2].getOutput
 }
 
 -- Compiles an expression into a stack machine code.
--- Takes an expression, returns a list of stack machine instructions
+-- Takes an expression, returns a list
+-- of stack machine instructions
 fun compileExpr (expr) {
   case expr of
-    Var (name) -> singletonBuffer(LD(name))
-  | Const (i) -> singletonBuffer(CONST(i))
-  | Binop (op, left, right) -> compileExpr(left) <+> compileExpr(right) <+> singletonBuffer(BINOP(op))
+    Var (x)          -> singletonBuffer (LD (x))
+  | Const (n)        -> singletonBuffer (CONST (n))
+  | Binop (op, l, r) -> compileExpr (l) <+> compileExpr (r) <+ BINOP (op)
   esac
 }
 
@@ -71,11 +63,14 @@ fun compileExpr (expr) {
 -- Takes a statement, returns a list of stack machine
 -- instructions.
 public fun compileSM (stmt) {
-  case stmt of
-    Assn (name, expr) -> compileExpr(expr) <+> singletonBuffer(ST(name))
-  | Seq (s1, s2) -> compileSM(s1) <+> compileSM(s2)
-  | Skip -> emptyBuffer()
-  | Read (name) -> singletonBuffer(READ) <+> singletonBuffer(ST(name))
-  | Write (expr) -> compileExpr(expr) <+> singletonBuffer(WRITE)
-  esac
+  fun compile (stmt) {
+    case stmt of
+      Assn (x, expr)     -> compileExpr (expr) <+ ST (x)
+    | Seq (stmt1, stmt2) -> compile (stmt1) <+> compile (stmt2)
+    | Skip               -> emptyBuffer ()
+    | Read (x)           -> singletonBuffer (READ) <+ ST (x)
+    | Write (expr)       -> compileExpr (expr) <+ WRITE
+    esac
+  }
+  getBuffer $ compile (stmt)
 }
