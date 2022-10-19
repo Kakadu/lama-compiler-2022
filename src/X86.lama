@@ -387,6 +387,35 @@ fun compileBinOp(env, code, op, x, y) {
         | ">=" -> compileCompare(env, code, s)
         | "!=" -> compileCompare(env, code, s)
         | "==" -> compileCompare(env, code, s)
+        | "&&" -> [env, 
+                    code <+ 
+                    Mov (x, eax) <+ 
+                    Binop ("^", edx, edx) <+
+                    Binop ("cmp", eax, edx) <+
+                    Set(suffix("!="), "%dl") <+
+                    Binop ("^", eax, eax) <+
+                    Binop ("cmp", y, eax) <+
+                    Set(suffix("!="), "%al") <+
+                    Binop ("&&", eax, edx) <+
+                    Mov (edx, s)
+                  ]
+        | "!!" -> [env, 
+                    code <+ 
+                    Mov (x, eax) <+ 
+                    Binop ("^", edx, edx) <+
+                    Binop ("cmp", eax, edx) <+
+                    Set(suffix("!="), "%dl") <+
+                    Binop ("^", eax, eax) <+
+                    Binop ("cmp", y, eax) <+
+                    Set(suffix("!="), "%al") <+
+                    Binop ("!!", eax, edx) <+
+                    Mov (edx, s)
+                  ]
+        | "^" ->  if stackOpnd(x) && stackOpnd(y) then
+                    [env, code <+ Mov (x, eax) <+ Binop ("^", eax, s)]
+                  else
+                    [env, code <+ Binop ("^", x, y)]
+                  fi
         | _ -> failure("Operator %s is not yet implemented\n", op.string)
     esac
   esac
