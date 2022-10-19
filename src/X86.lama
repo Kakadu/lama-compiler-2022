@@ -312,6 +312,20 @@ fun compileBinop (op, l, r) {
     <+ Mov (eax, r)
   }
 
+  -- Performs logical operation and stores result in r
+  fun logicBinop (op, l, r) {
+    -- If value == 0 then r32 = 0. Else r32 = 1;
+    fun toBool (r32, r8, value) {
+      singletonBuffer(Binop ("^", r32, r32)) 
+      <+ Binop ("cmp", value, r32)
+      <+ Set (suffix ("!="), r8) 
+    }
+    toBool (eax, "%al", l) 
+    <+> toBool (edx, "%dl", r)
+    <+  Binop (op, eax, edx)
+    <+  Mov (edx, r)
+  }
+
   case op of
       "+"  -> memRegBinop (op, l, r)
     | "-"  -> memRegBinop (op, l, r)
@@ -324,6 +338,8 @@ fun compileBinop (op, l, r) {
     | ">=" -> cmpBinop (op, l, r)
     | "==" -> cmpBinop (op, l, r)
     | "!=" -> cmpBinop (op, l, r)
+    | "&&" -> logicBinop (op, l, r)
+    | "!!" -> logicBinop (op, l, r)
     | _ -> failure ("Unsupported operation %s", op)
   esac
 }
