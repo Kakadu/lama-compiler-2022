@@ -312,8 +312,7 @@ fun compileBinop(op, x, y) {
   }
 
   fun compileLogic(op, x, y) {
-    singletonBuffer (Mov (x, eax)) <+
-    Binop ("^", eax, eax) <+
+    singletonBuffer (Binop ("^", eax, eax)) <+
     Binop ("cmp", y, eax) <+
     Set (Suffix ("!="), "%al") <+
     Binop ("^", edx, edx) <+
