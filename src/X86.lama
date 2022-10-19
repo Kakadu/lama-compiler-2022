@@ -288,6 +288,42 @@ fun compile (env, code) {
           case env.pop of
             [s, env] -> [env, code <+ Push (s) <+ Call ("Lwrite") <+ Pop (eax)]
           esac
+      | CONST (c) ->
+          case env.allocate of
+            [s, env] -> [env, code <+> move (L (c), s)]
+          esac
+      | LD (x) ->
+          case env.addGlobal (x).allocate of
+            [s, env] -> [env, code <+> move (env.loc (x), s)]
+          esac
+      | ST (x) ->
+          case env.addGlobal (x).pop of
+            [s, env] -> [env, code <+> move (s, env.loc (x))]
+          esac
+      | BINOP(op)    ->
+          case env.pop2 of
+            [e2, e1, env] -> [env.push(e2), code <+>
+              if compare(op, "+") == 0 !! compare(op, "-") == 0 !! compare(op, "*") == 0
+                then
+                  move(e1, eax) <+ Binop(op, e2, eax) <+> move(eax, e2)
+              elif compare(op, "/") == 0
+                then
+                move(e1, eax) <+ Cltd <+ IDiv(e2) <+> move(eax, e2)
+              elif compare(op, "%") == 0
+                then
+                move(e1, eax) <+ Cltd <+ IDiv(e2) <+> move(edx, e2)
+              elif compare(op, "<") == 0 !! compare(op, "<=") == 0 !! compare(op, ">=") == 0 !! compare(op, ">") == 0 !! compare(op, "==") == 0 !! compare(op, "!=") == 0
+                then
+                  move(e1, eax) <+ Binop ("cmp", e2, eax) <+> move (L (0), eax) <+ Set (suffix (op), "%al") <+> move (eax, e2)
+              elif compare(op, "&&") == 0 !! compare(op, "!!") == 0
+                then
+                  move (e2, eax) <+ Binop (op, e2, eax) <+> move (L (0), eax) <+ Set ("ne", "%al") 
+                  <+> move (e1, edx) <+ Binop (op, e1, edx) <+> move (L (0), edx) <+ Set ("ne", "%dl")
+                  <+ Binop (op, edx, eax) <+ Set ("ne", "%al") <+> move (eax, e2)
+              else failure("unknown op: %s\n", op)
+              fi
+            ]
+          esac
       | _ -> failure ("codegeneration for instruction %s is not yet implemented\n", i.string)
       esac
     }, [env, emptyBuffer ()], code)
