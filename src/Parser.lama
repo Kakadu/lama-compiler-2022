@@ -40,8 +40,6 @@ var i = 0;
 
 var stmts = memo $ listBy (stmt, s (";")) @ fun (l_stmt) {
   foldl (fun (acc, s) {
-    i := i + 1;
-    if i == 0 then failure (string (acc) ++ " " ++ string (s)) fi;
     case acc of None -> s | _ -> Seq (acc, s) esac
   }, None, l_stmt)
 };
