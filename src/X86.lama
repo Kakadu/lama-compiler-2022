@@ -273,6 +273,50 @@ fun suffix (op) {
   esac
 }
 
+fun compileFirstGroup (code, s, op, x, y) {
+    code <+ Mov (y, edx) <+ Binop (op, x, edx) <+ Mov (edx, s)
+}
+
+fun compileSecondGroup (code, s, reg, x, y) {
+    code <+ Mov (y, eax) <+ Cltd <+ IDiv (x) <+ Mov (reg, s)
+}
+
+fun compileThirdGroup (code, s, op, x, y) {
+    code <+ Binop ("^", eax, eax) <+ Mov (y, edx) <+ Binop ("cmp", x, edx)
+         <+ Set (suffix (op), "%al") <+ Mov (eax, s)
+}
+
+fun compileFourthGroup (code, s, op, x, y) {
+    fun reduceValToBin (r32, r8, value) {
+      listBuffer ({Binop ("^", r32, r32), Binop ("cmp", value, r32), Set (suffix ("!="), r8)})
+    }
+    code <+> reduceValToBin (eax, "%al", x) <+> reduceValToBin (edx, "%dl", y)
+         <+ Binop (op, eax, edx) <+ Mov (edx, s)
+}
+
+fun compileBinop(env, code, s, op, x, y) {
+  fun compileOp () {
+    case op of
+      "+"  -> compileFirstGroup  (code, s, op,  x, y)
+    | "-"  -> compileFirstGroup  (code, s, op,  x, y)
+    | "*"  -> compileFirstGroup  (code, s, op,  x, y)
+    | "/"  -> compileSecondGroup (code, s, eax, x, y)
+    | "%"  -> compileSecondGroup (code, s, edx, x, y)
+    | "<"  -> compileThirdGroup  (code, s, op,  x, y)
+    | "<=" -> compileThirdGroup  (code, s, op,  x, y)
+    | "==" -> compileThirdGroup  (code, s, op,  x, y)
+    | "!=" -> compileThirdGroup  (code, s, op,  x, y)
+    | ">=" -> compileThirdGroup  (code, s, op,  x, y)
+    | ">"  -> compileThirdGroup  (code, s, op,  x, y)
+    | "&&" -> compileFourthGroup (code, s, op,  x, y)
+    | "!!" -> compileFourthGroup (code, s, op,  x, y)
+    | "^"  -> compileFourthGroup (code, s, op,  x, y)
+    esac
+  }
+
+  [env, compileOp ()]
+}
+
 -- Compiles stack machine code into a list of x86 instructions. Takes an environment
 -- and stack machine code, returns an updated environment and x86 code.
 fun compile (env, code) {
@@ -288,9 +332,25 @@ fun compile (env, code) {
           case env.pop of
             [s, env] -> [env, code <+ Push (s) <+ Call ("Lwrite") <+ Pop (eax)]
           esac
-      | _ -> failure ("codegeneration for instruction %s is not yet implemented\n", i.string)
+      | BINOP (op) -> 
+          case env.pop2 of
+            [x, y, env] -> case env.allocate of [s, env] -> compileBinop (env, code, s, op, x, y) esac
+          esac
+      | LD (name) ->
+          case env.addGlobal (name).allocate of
+            [s, env] -> [env, code <+> move(env.loc (name), s)]
+          esac
+      | ST (name) ->
+          case env.addGlobal (name).pop of
+            [s, env] -> [env, code <+> move(s, env.loc (name))]
+          esac
+      | CONST (v) -> 
+          case env.allocate of
+            [s, env] -> [env, code <+ Mov (L (v), s)]
+          esac
       esac
-    }, [env, emptyBuffer ()], code)
+    }, [env, emptyBuffer ()], getBuffer (code)
+  )
 }
 
 -- A top-level codegeneration function. Takes a driver's environment and a stack machine program,
