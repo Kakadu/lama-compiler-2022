@@ -34,8 +34,8 @@ var wordSize = 4;
 --    L (int)    -- an immediate operand             
 
 -- Some x86 instruction (we do not need all of them):
---   Mov   (opnd, opnd)         -- copies a value from the first to the second operand  
 --   Binop (string, opnd, opnd) -- makes a binary operation; note, the first operand   
+--   Mov   (opnd, opnd)         -- copies a value from the first to the second operand  
 --                                 designates x86 operator, not the source language one
 --   IDiv  (opnd)               -- x86 integer division, see instruction set reference 
 --   Cltd                       -- see instruction set reference           
@@ -47,7 +47,17 @@ var wordSize = 4;
 --   Call  (string)             -- calls a function by its name 
 --   Ret                        -- returns from a function
 --   Meta  (string)             -- metainformation (declarations, etc.)
-                                                               
+
+
+fun opndString (opnd) {
+    case opnd of
+      R (i) -> regs [i]
+    | S (i) -> sprintf ("-%d(%%ebp)", (i+1) * wordSize)
+    | M (x) -> x
+    | L (i) -> sprintf ("$%d", i)
+    esac
+  }
+
 -- Machine instruction printer
 fun insnString (insn) {
   
@@ -63,14 +73,7 @@ fun insnString (insn) {
     esac
   }
 
-  fun opndString (opnd) {
-    case opnd of
-      R (i) -> regs [i]
-    | S (i) -> sprintf ("-%d(%%ebp)", (i+1) * wordSize)
-    | M (x) -> x
-    | L (i) -> sprintf ("$%d", i)
-    esac
-  }
+
   
   case insn of
     Cltd               -> "\tcltd\n"
@@ -100,7 +103,7 @@ fun makeEnv (stack, stackSlots, globals) {
 
   -- Returns a string representation of the environment
   fun envString () {
-    sprintf ("Stack     : %s\nStackSlots: %d\nGlobals   : %s\n", stack.string, stackSlots, elements (globals).string)
+    sprintf ("Stack     : %s\n# StackSlots: %d\n# Globals   : %s\n", stack.string, stackSlots, elements (globals).string)
   }
   
   -- Allocates a new position on the symbolic stack;
@@ -278,7 +281,7 @@ fun suffix (op) {
 fun compile (env, code) {
   foldl (
     fun ([env, scode], i) {
-      var code = scode <+ Meta ("# " ++ showSMInsn (i) ++ "\n");
+      var code = scode <+ Meta ("# " ++ showSMInsn (i) ++ "\n") <+ Meta ("# " ++ envString(env));
       case i of
         READ ->
           case env.allocate of
@@ -288,9 +291,51 @@ fun compile (env, code) {
           case env.pop of
             [s, env] -> [env, code <+ Push (s) <+ Call ("Lwrite") <+ Pop (eax)]
           esac
-      | _ -> failure ("codegeneration for instruction %s is not yet implemented\n", i.string)
+      | CONST (n) ->
+          case env.allocate of
+            [s, env] -> [env, code <+> move(L(n), s)]
+          esac
+      | LD (varname) -> 
+          case env.addGlobal(varname).allocate of
+            [s, env] -> [env, code <+> move(env.loc(varname), s)]
+          esac
+      | ST (varname) ->
+          case env.pop of
+            [s, env] ->
+              case env.addGlobal(varname) of
+                end -> [env, code <+> move(s, env.loc(varname))]
+              esac
+          esac
+      | BINOP (op) ->
+        case env.pop2 of
+          [right, left, env] ->
+            case env.allocate of
+              [result, env] -> (
+                var meta = Meta ("# " ++ opndString(left) ++ " " ++ op ++ " " ++ opndString(right) ++ " to " ++ opndString(result) ++ "\n");
+                [env, code <+> singletonBuffer(meta) <+> binop(op, left, right, result)]
+              )
+            esac
+        esac
       esac
-    }, [env, emptyBuffer ()], code)
+    }, [env, emptyBuffer ()], getBuffer(code))
+}
+
+
+fun binop(op, left, right, result) {
+  fun opType(op) {
+    case op of
+      "+" -> SimpleEax(op)
+    | "-" -> SimpleEax(op)
+    | "*" -> SimpleEax(op)
+    | "&&" -> SimpleEax(op)
+    | "!!" -> SimpleEax(op)
+
+    | "/" -> Div
+    | "%" -> Mod
+
+    | _ -> Cmp(op)
+    esac
+  }
 }
 
 -- A top-level codegeneration function. Takes a driver's environment and a stack machine program,
