@@ -12,14 +12,28 @@ fun inbr (l, p, r) {
   syntax (-l p -r)
 }
 
+fun genRules(ops) {
+  map (fun (op) {[s (op), fun (l, op, r) { Binop (op, l, r) }]}, ops)
+}
+
 -- Primary expression
 var primary = memo $ eta (decimal @ fun (x) {Const (stringInt (x))} |
                           lident  @ fun (x) {Var (x)} |
                           inbr (s ("("), exp, s (")"))),
-    exp = memo $ eta (failure ("expression parsing not implemented\n"));
+      exp = memo $ expr ({
+                            [Left, genRules ({ "!!" })],
+                            [Left, genRules ({ "&&" })],
+                            [Nona, genRules ({ "<", ">", "<=", ">=", "==", "!=" })],
+                            [Left, genRules ({ "+", "-" })],
+                            [Left, genRules ({ "*", "/", "%" })]
+                         }, primary);
 
-var stmt = memo $ eta (failure ("statement parsing not implemented\n"));
-   
+var stmt = memo $ eta syntax (x=lident s[":="] e=exp { Assn (x, e) }              |
+                              x=stmt s[";"] y=stmt end { Seq (x, y) }             |
+                              kSkip { Skip }                                      |
+                              kRead x=inbr[s ("("), lident, s (")")] { Read (x) } |
+                              kWrite e=inbr[s ("("), exp, s (")")] { Write (e) });
 
 -- Public top-level parser
 public parse = stmt;
+             
