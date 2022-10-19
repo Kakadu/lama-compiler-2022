@@ -28,16 +28,16 @@ var ebx = R (0),
 var wordSize = 4;
 
 -- We need to distinguish the following operand types: 
---    R (int)       -- hard register                    
---    S (int)       -- a position on the hardware stack 
---    M (string)    -- a named memory location          
+--    R (int)       -- hard register
+--    S (int)       -- a position on the hardware stack
+--    M (string)    -- a named memory location
 --    L (int)       -- an immediate operand
 --    I (int, opnd) -- an indirect operand with offset
 
 -- Some x86 instruction (we do not need all of them):
 --   Mov   (opnd, opnd)         -- copies a value from the first to the second operand  
 --   Lea   (opnd, opnd)         -- loads an address of the first operand into the second
---   Binop (string, opnd, opnd) -- makes a binary operation; note, the first operand   
+--   Binop (string, opnd, opnd) -- makes a binary operation; note, the first operand
 --                                 designates x86 operator, not the source language one
 --   IDiv  (opnd)               -- x86 integer division, see instruction set reference 
 --   Cltd                       -- see instruction set reference           
@@ -155,7 +155,7 @@ fun makeEnv (stack, stackSlots, globals, barrier, stackMap) {
   fun peek () {
     stack.fst
   }
-  
+
   -- Adds a global variable; returns an updated environment
   fun addGlobal (name) {
     makeEnv (stack, stackSlots, addSet (globals, globalName (name)), barrier, stackMap)
@@ -349,26 +349,61 @@ fun suffix (op) {
 
 -- Compiles stack machine code into a list of x86 instructions. Takes an environment
 -- and stack machine code, returns an updated environment and x86 code.
-fun compile (env, code) {
-  fun compile (env, code) {
-    foldl (
-      fun ([env, scode], i) {
-        var code = scode <+ Meta ("# " ++ showSMInsn (i) ++ "\n");
-        case i of
-          READ ->
-            case env.allocate of
-              [s, env] -> [env, code <+ Call ("Lread") <+ Mov (eax, s)]
-            esac             
-        | WRITE ->
-            case env.pop of
-              [s, env] -> [env, code <+ Push (s) <+ Call ("Lwrite") <+ Pop (eax)]
+fun compile(env, code) {
+  foldl(
+    fun ([env, scode], i) {
+      var code = scode <+ Meta("# " ++ showSMInsn(i) ++ "\n");
+      case i of
+        READ         ->
+          case env.allocate of
+            [s, env] -> [env, code <+ Call("Lread") <+ Mov(eax, s)]
+          esac
+        | WRITE        ->
+          case env.pop of
+            [s, env] -> [env, code <+ Push(s) <+ Call("Lwrite") <+ Pop(eax)]
+          esac
+        | BINOP(binop) ->
+          case env.pop2 of
+            [expr1, expr2, env] -> case env.allocate of [s, env] -> (
+              fun compileBinop(expr1, expr2, s, binop) {
+                case binop of
+                  "+"    -> move(expr2, eax) <+ Binop(binop, expr1, eax) <+> move(eax, s)
+                  | "-"  -> move(expr2, eax) <+ Binop(binop, expr1, eax) <+> move(eax, s)
+                  | "*"  -> move(expr2, eax) <+ Binop(binop, expr1, eax) <+> move(eax, s)
+                  | "/"  -> move(expr2, eax) <+ Cltd <+ IDiv(expr1) <+> move(eax, s)
+                  | "%"  -> move(expr2, eax) <+ Cltd <+ IDiv(expr1) <+> move(edx, s)
+                  | "<"  -> move(expr2, eax) <+ Binop("cmp", expr1, eax) <+> move(L(0), eax) <+ Set(suffix(binop), "%al") <+> move(eax, s)
+                  | ">"  -> move(expr2, eax) <+ Binop("cmp", expr1, eax) <+> move(L(0), eax) <+ Set(suffix(binop), "%al") <+> move(eax, s)
+                  | "<=" -> move(expr2, eax) <+ Binop("cmp", expr1, eax) <+> move(L(0), eax) <+ Set(suffix(binop), "%al") <+> move(eax, s)
+                  | ">=" -> move(expr2, eax) <+ Binop("cmp", expr1, eax) <+> move(L(0), eax) <+ Set(suffix(binop), "%al") <+> move(eax, s)
+                  | "==" -> move(expr2, eax) <+ Binop("cmp", expr1, eax) <+> move(L(0), eax) <+ Set(suffix(binop), "%al") <+> move(eax, s)
+                  | "!=" -> move(expr2, eax) <+ Binop("cmp", expr1, eax) <+> move(L(0), eax) <+ Set(suffix(binop), "%al") <+> move(eax, s)
+                  | "&&" -> move(expr2, eax) <+ Binop("cmp", L(0), eax) <+> move(L(0), eax) <+ Set(suffix("!="), "%al") <+> move(eax, expr2)
+                    <+> move(expr1, eax) <+ Binop("cmp", L(0), eax) <+> move(L(0), eax) <+ Set(suffix("!="), "%al") <+> move(eax, expr1)
+                    <+> move(expr2, eax) <+ Binop(binop, expr1, eax) <+> move(eax, s)
+                  | "!!" -> move(expr2, eax) <+ Binop("cmp", L(0), eax) <+> move(L(0), eax) <+ Set(suffix("!="), "%al") <+> move(eax, expr2)
+                    <+> move(expr1, eax) <+ Binop("cmp", L(0), eax) <+> move(L(0), eax) <+ Set(suffix("!="), "%al") <+> move(eax, expr1)
+                    <+> move(expr2, eax) <+ Binop(binop, expr1, eax) <+> move(eax, s)
+                esac
+              }
+              [env, code <+> compileBinop(expr1, expr2, s, binop)]
+            )
             esac
-        | _ -> failure ("codegeneration for instruction %s is not yet implemented\n", i.string)
-        esac
-      }, [env, emptyBuffer ()], code)
-  }
-
-  compile (env, code) 
+          esac
+        | LD(x)        ->
+          case env.addGlobal(x).allocate of
+            [s, env] -> [env, code <+> move(env.loc(x), s)]
+          esac
+        | ST(x)        ->
+          case env.addGlobal(x).pop of
+            [s, env] -> [env, code <+> move(s, env.loc(x))]
+          esac
+        | CONST(n)     ->
+          case env.allocate of
+            [s, env] -> [env, code <+> move(L(n), s)]
+          esac
+      esac
+    }, [env, emptyBuffer()], code)
 }
 
 -- A top-level codegeneration function. Takes a driver's environment and a stack machine program,
