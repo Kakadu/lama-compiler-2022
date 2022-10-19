@@ -13,6 +13,37 @@ import State;
 --        Const (int)                |
 --        Binop (string, expr, expr)
 
+public fun evalBinop (str_op, x, y) {
+  case str_op of
+    "+" -> infix +
+   | "-" -> infix -
+   | "*" -> infix *
+   | "/" -> infix /
+   | "%" -> infix %
+   | "==" -> infix ==
+   | "!=" -> infix !=
+   | "<" -> infix <
+   | ">" -> infix >
+   | "<=" -> infix <=
+   | ">=" -> infix >=
+   | "!!" -> infix !!
+   | "&&" -> infix &&
+  esac (x, y)
+}
+
+-- The evaluator itself: takes a state and an expression,
+-- returns integer value
+--
+-- An expression is represented by a data structure of the following shape:
+--
+-- expr = Var   (string)             |
+--        Const (int)                |
+--        Binop (string, expr, expr)
+
 public fun evalExpr (st, expr) {
-  failure ("evalExpr not implemented\n")
+  case expr of
+    Var   (x)            -> st (x)
+  | Const (n)            -> n
+  | Binop (str_op, x, y) -> evalBinop (str_op, evalExpr (st, x), evalExpr (st, y))
+  esac
 }
