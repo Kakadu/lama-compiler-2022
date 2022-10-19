@@ -3,6 +3,25 @@
 import List;
 import State;
 
+fun evalBinop(op, x, y)
+{
+  case op of
+    "+"    -> x + y
+    | "-"  -> x - y
+    | "*"  -> x * y
+    | "/"  -> x / y
+    | "%"  -> x % y
+    | "<"  -> x < y
+    | "<=" -> x <= y
+    | ">"  -> x > y
+    | ">=" -> x >= y
+    | "==" -> x == y
+    | "!=" -> x != y
+    | "&&" -> x && y
+    | "!!" -> x !! y
+    | _    -> failure("Unexpected binary operator <%s>\n", op.string)
+  esac
+}
 
 -- The evaluator itself: takes a state and an expression,
 -- returns integer value
@@ -13,6 +32,12 @@ import State;
 --        Const (int)                |
 --        Binop (string, expr, expr)
 
-public fun evalExpr (st, expr) {
-  failure ("evalExpr not implemented\n")
+public fun evalExpr(st, expr)
+{
+  case expr of
+    Var (x)            -> st(x)
+    | Const (n)        -> n
+    | Binop (op, x, y) -> evalBinop(op, evalExpr(st, x), evalExpr(st, y))
+    | _                -> failure("Unexpected expression <%s>\n", expr.string)
+  esac
 }
