@@ -312,12 +312,17 @@ fun compileBinop(op, x, y) {
   }
 
   fun compileLogic(op, x, y) {
-    singletonBuffer (Binop ("^", eax, eax)) <+
-    Binop ("cmp", y, eax) <+
-    Set (Suffix ("!="), "%al") <+
-    Binop ("^", edx, edx) <+
-    Binop ("cmp", x, edx) <+
-    Set (Suffix ("!="), "%dl") <+
+    singletonBuffer (Mov (y, edx)) <+
+    Mov (L (0), eax) <+
+    Binop ("cmp", edx, eax) <+
+    Set (suffix("!="), "%al") <+
+    Push (eax) <+
+    Mov (x, edx) <+
+    Mov (L (0), eax) <+
+    Binop ("cmp", edx, eax) <+
+    Mov (L (0), edx) <+
+    Set (suffix("!="), "%dl") <+
+    Pop (eax) <+
     Binop (op, edx, eax) <+
     Mov (eax, y)
   }
@@ -336,6 +341,7 @@ fun compileBinop(op, x, y) {
   | ">=" -> compileCmp (op, x, y)
   | ">"  -> compileCmp (op, x, y)
   | "!!" -> compileLogic (op, x, y)
+  | "^" -> compileLogic (op, x, y)
   esac
 }
 
