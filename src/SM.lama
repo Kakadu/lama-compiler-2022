@@ -52,10 +52,70 @@ fun fromLabel (env, lab) {
   env [0] (lab)
 }
 
+fun insType (i) {
+  case i of
+      READ      -> NonJumping
+    | WRITE     -> NonJumping
+    | BINOP (_) -> NonJumping
+    | LD    (_) -> NonJumping
+    | CONST (_) -> NonJumping
+    | ST    (_) -> NonJumping
+    | LABEL (_) -> NonJumping
+    | _         -> Jumping
+  esac
+}
+
+fun insnsAfterCondJump(env, value, cond, lab, oldInsns) {
+  if (compare(cond, "z") == 0 && value == 0) !! (compare(cond, "nz") == 0 && value) then
+    fromLabel(env, lab)
+  else
+    oldInsns
+  fi
+}
+
+fun confStackPop([v : stack, st, w]) {
+  [v, [stack, st, w]]
+}
+
+fun printInsns(insns) {
+  case insns of
+      {} -> skip
+    | i : insns -> printf ("%s\n", i.string); printInsns(insns)
+  esac
+}
+
 -- Stack machine interpreter. Takes an environment, an SM-configuration and a program,
 -- returns a final configuration
 fun eval (env, c, insns) {
-  failure ("SM eval not implemented\n")
+  case insns of
+      {}        -> c
+    | i : insns ->
+        case insType(i) of
+          NonJumping -> eval(env, execSMIns(c, i), insns)
+        | Jumping    ->
+            case i of
+              JMP  (l)    -> eval(env, c, fromLabel(env, l))
+            | CJMP (s, l) ->
+                case confStackPop(c) of [v, c] ->
+                    eval(env, c, insnsAfterCondJump(env, v, s, l, insns))
+                esac
+            esac
+        esac
+  esac  
+}
+
+fun execSMIns(c, i) {
+  case c of [stack, st, w] ->
+    case i of
+        READ      -> case readWorld(w) of [v, w] -> [v : stack, st, w] esac
+      | WRITE     -> case stack of v : stack -> [stack, st, writeWorld(v, w)] esac
+      | BINOP (s) -> case stack of v2 : v1 : stack -> [evalBinOperations(s, v1, v2) : stack, st, w] esac
+      | LD    (x) -> [st(x) : stack, st, w]
+      | ST    (x) -> case stack of v : stack -> [stack, st <- [x, v], w] esac
+      | CONST (n) -> [n : stack, st, w]
+      | LABEL (_) -> c
+    esac
+  esac
 }
 
 -- Runs a stack machine for a given input and a given program, returns an output
@@ -97,10 +157,10 @@ fun genLabels (env, n) {
 -- Takes an expression, returns a list of stack machine instructions
 fun compileExpr (expr) {
   case expr of
-      Var (x) -> { LD (x) }
-    | Const (n) -> { CONST (n) }
+      Var (x) -> singletonBuffer(LD (x))
+    | Const (n) -> singletonBuffer(CONST (n))
     | Binop (operation, leftExpr, rightExpr)
-        -> compileExpr (leftExpr) +++ compileExpr (rightExpr) +++ { BINOP (operation) }
+        -> compileExpr (leftExpr) <+> compileExpr (rightExpr) <+ BINOP (operation)
   esac
 }
 
@@ -142,7 +202,43 @@ public fun compileSM (stmt) {
                   esac
              esac
         esac
-    | _              -> failure ("compileSM not implemented\n")
+    | If (cond, sTrue, sFalse) ->
+        case env.genLabels(2) of [sTrueEnd, sFalseStart, env] ->
+            case compile (sTrueEnd, env, sTrue) of [sTrueEndUsed, env, sTrueCode] ->
+                case compile (lab, env, sFalse) of [labUsed, env, sFalseCode] ->
+                    [true, env, compileExpr(cond)
+                                <+  CJMP ("z", sFalseStart)
+                                <+> sTrueCode
+                                <+> label(sTrueEnd, sTrueEndUsed)
+                                <+  JMP(lab)
+                                <+  LABEL(sFalseStart)
+                                <+> sFalseCode]
+                esac
+            esac
+        esac
+
+    | While (cond, body) ->
+        case env.genLabels(2) of [condStart, bodyEnd, env] ->
+            case compile(bodyEnd, env, body) of [bodyEndUsed, env, bodyCode] ->
+                [true, env, singletonBuffer(LABEL(condStart))
+                            <+> compileExpr(cond)
+                            <+  CJMP("z", lab)
+                            <+> bodyCode
+                            <+> label(bodyEnd, bodyEndUsed)
+                            <+  JMP(condStart)]
+            esac
+        esac
+    | DoWhile (body, cond) ->
+        case env.genLabels(2) of [bodyStart, bodyEnd, env] ->
+            case compile(bodyEnd, env, body) of [bodyEndUsed, env, bodyCode] ->
+                [false, env, singletonBuffer(LABEL(bodyStart))
+                            <+> bodyCode
+                            <+> label(bodyEnd, bodyEndUsed)
+                            <+> compileExpr(cond)
+                            <+  CJMP ("nz", bodyStart)]
+            esac
+        esac  
+    | _ -> failure ("compileSM not implemented\n")
     esac
   }  
 
@@ -153,3 +249,5 @@ public fun compileSM (stmt) {
        esac
   esac
 }
+
+var cnt = 0;

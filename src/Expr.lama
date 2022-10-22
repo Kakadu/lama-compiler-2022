@@ -24,7 +24,7 @@ public fun evalExpr (state, expr) {
 
 public fun evalBinOperations (operation, leftExpr, rightExpr) {
   case operation of
-    "+"  -> leftExpr + rightExpr
+      "+"  -> leftExpr + rightExpr
     | "-"  -> leftExpr - rightExpr
     | "*"  -> leftExpr * rightExpr
     | "/"  -> leftExpr / rightExpr
