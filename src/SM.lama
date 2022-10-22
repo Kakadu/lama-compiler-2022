@@ -96,7 +96,12 @@ fun genLabels (env, n) {
 -- Compiles an expression into a stack machine code.
 -- Takes an expression, returns a list of stack machine instructions
 fun compileExpr (expr) {
-  failure ("compileExpr not implemented\n")
+  case expr of
+      Var (x) -> { LD (x) }
+    | Const (n) -> { CONST (n) }
+    | Binop (operation, leftExpr, rightExpr)
+        -> compileExpr (leftExpr) +++ compileExpr (rightExpr) +++ { BINOP (operation) }
+  esac
 }
 
 -- Compiles a statement into a stack machine code.
