@@ -30,6 +30,12 @@ fun eval(c @ [state, world], stmt) {
         [z, world] -> [state <- [x, z], world]
       esac
     | Write(e)          -> [state, writeWorld(evalExpr(state, e), world)]
+    | If (expr, stmt1, stmt2) -> if evalExpr(state, expr) then eval(c, stmt1) else eval(c, stmt2) fi
+    | While (expr, stmt0)     -> if evalExpr(state, expr) then eval(eval(c, stmt0), stmt) else c fi
+    | DoWhile (stmt0, expr)   ->
+      case eval(c, stmt0) of
+        newc@[state, world] -> if evalExpr(state, expr) then eval(newc, stmt) else newc fi
+      esac
   esac
 }
 
