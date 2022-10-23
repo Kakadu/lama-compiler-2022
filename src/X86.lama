@@ -282,20 +282,61 @@ fun suffix (op) {
 -- Compiles stack machine code into a list of x86 instructions. Takes an environment
 -- and stack machine code, returns an updated environment and x86 code.
 fun compile (env, code) {
+  fun isOneOf(x, l) {
+    case find(fun (e) { compare(x, e) == 0 }, l) of
+      None -> false
+      | _  -> true
+    esac
+  }
   foldl (
     fun ([env, scode], i) {
       var code = scode <+ Meta ("# " ++ showSMInsn (i) ++ "\n");
       case i of
-        READ ->
+          READ ->
           case env.allocate of
             [s, env] -> [env, code <+ Call ("Lread") <+ Mov (eax, s)]
           esac             
-      | WRITE ->
+        | WRITE ->
           case env.pop of
             [s, env] -> [env, code <+ Push (s) <+ Call ("Lwrite") <+ Pop (eax)]
           esac
-      | _ -> failure ("codegeneration for instruction %s is not yet implemented\n", i.string)
+        | CONST (n)  ->
+          case env.allocate of
+            [s, env] -> [env, code <+> move(L(n), s)]
+          esac
+        | LD (x)     ->
+          case env.addGlobal(x).allocate of
+            [s, env] -> [env, code <+> move(env.loc(x), s)]
+          esac
+        | ST (x)     ->
+          case env.addGlobal(x).pop of
+            [s, env] -> [env, code <+> move(s, env.loc(x))]
+          esac
+        | BINOP (op) -> case env.pop2 of
+          [y, x, env] -> (
+            var compiled =
+              if
+                op.isOneOf({ "+", "-", "*" }) then
+                move(x, eax) <+ Binop(op, y, eax) <+> move(eax, y)
+                elif op.isOneOf({ "/", "%" }) then
+                  move(x, eax) <+ Cltd <+ IDiv(y) <+> move(if compare(op, "/") == 0 then eax else edx fi, y)
+                elif op.isOneOf({ "<", ">", "<=", ">=", "==", "!=" }) then
+                  move(x, eax) <+ Binop("^", edx, edx) <+ Binop("cmp", y, eax) <+ Set(suffix(op), "%dl") <+> move(edx, y)
+                elif op.isOneOf({ "&&", "!!" }) then
+                  listBuffer({
+                    Binop("^", eax, eax), Binop("cmp", x, eax), Set(suffix("!="), "%al"),
+                    Binop("^", edx, edx), Binop("cmp", y, edx), Set(suffix("!="), "%dl"),
+                    Binop(op, edx, eax), Mov(eax, y)
+                  })
+                else
+                  failure("unkown binary operator %s\n", op)
+              fi
+            ;
+            [env.push(y), code <+> compiled]
+          )
         esac
+        | _          -> failure("codegeneration for instruction %s is not yet implemented\n", i.string)
+      esac
     }, [env, emptyBuffer ()], code)}
 
 -- A top-level codegeneration function. Takes a driver's environment and a stack machine program,

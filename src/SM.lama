@@ -54,8 +54,26 @@ fun fromLabel (env, lab) {
 
 -- Stack machine interpreter. Takes an environment, an SM-configuration and a program,
 -- returns a final configuration
-fun eval (env, c, insns) {
-  failure ("SM eval not implemented\n")
+fun eval(env, c, insns) {
+  fun step([stack, state, world], insn) {
+    case insn of
+      READ           -> case readWorld(world) of
+        [z, w] -> [z:stack, state, w]
+      esac
+      | WRITE        -> case stack of
+        z : stack -> [stack, state, writeWorld(z, world)]
+      esac
+      | BINOP(binop) -> case stack of
+        z2 : z1 : stack -> [evalBinop(binop)(z1, z2):stack, state, world]
+      esac
+      | LD (x)       -> [state(x):stack, state, world]
+      | ST (x)       -> case stack of
+        z : stack -> [stack, state <- [x, z], world]
+      esac
+      | CONST (n)    -> [n:stack, state, world]
+    esac
+  }
+  foldl(step, c, insns)
 }
 
 -- Runs a stack machine for a given input and a given program, returns an output
@@ -95,8 +113,18 @@ fun genLabels (env, n) {
 
 -- Compiles an expression into a stack machine code.
 -- Takes an expression, returns a list of stack machine instructions
-fun compileExpr (expr) {
-  failure ("compileExpr not implemented\n")
+fun compileExpr(expr) {
+  getBuffer(compileExprBuf(expr))
+}
+
+-- Compiles an expression into a stack machine code.
+-- Takes an expression, returns a buffer of stack machine instructions
+fun compileExprBuf(expr) {
+  case expr of
+    Const (n)               -> singletonBuffer $ CONST(n)
+    | Var (x)               -> singletonBuffer $ LD(x)
+    | Binop (binop, e1, e2) -> compileExprBuf(e1) <+> compileExprBuf(e2) <+ BINOP(binop)
+  esac
 }
 
 -- Compiles a statement into a stack machine code.
