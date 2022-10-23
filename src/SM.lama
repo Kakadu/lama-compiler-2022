@@ -170,7 +170,7 @@ public fun compileSM(stmt) {
         case env.genLabels(2) of
           [condLab, bodyLab, env] ->
             case compile(condLab, env, s) of
-              [condLabUsed, env, bodyCode] -> [false, env,
+              [_, env, bodyCode] -> [false, env,
                 singletonBuffer(JMP(condLab))
                 <+ LABEL(bodyLab)
                 <+> bodyCode
@@ -184,7 +184,7 @@ public fun compileSM(stmt) {
         case env.genLabels(2) of
           [condLab, bodyLab, env] ->
             case compile(condLab, env, s) of
-              [condLabUsed, env, bodyCode] -> [false, env,
+              [_, env, bodyCode] -> [false, env,
                 singletonBuffer(LABEL(bodyLab))
                 <+> bodyCode
                 <+ LABEL(condLab)
