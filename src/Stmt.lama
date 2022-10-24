@@ -19,16 +19,19 @@ import World;
 --        While   (expr, stmt)       |
 --        DoWhile (stmt, expr)
 
-fun eval ([s, w], stmt) {
+fun eval (c@[s, w], stmt) {
   case stmt of
-    Assn (x, expr)      -> [s <- [x, evalExpr(s, expr)], w]
-    | Seq(stmt1, stmt2) -> eval(eval([s, w], stmt1), stmt2)
-    | Skip              -> [s, w]
-    | Read(x)           ->
-      case readWorld(w) of
+      Assn (x, expr) -> [s <- [x, evalExpr (s, expr)], w]
+    | Seq(stmt1, stmt2) -> eval (eval (c, stmt1), stmt2)
+    | Skip -> c
+    | Read(x) ->
+      case readWorld (w) of
         [z, w] -> [s <- [x, z], w]
       esac
-    | Write(expr)       -> [s, writeWorld(evalExpr(s, expr), w)]
+    | Write(expr) -> [s, writeWorld (evalExpr (s, expr), w)]
+    | If (cond, stmt1, stmt2) -> if evalExpr (s, cond) then eval (c, stmt1) else eval (c, stmt2) fi
+    | While (cond, body) -> if evalExpr (s, cond) then eval (eval (c, body), stmt) else c fi
+    | DoWhile (body, cond) -> eval (eval (c, body), While (cond, body))
   esac
 }
 
