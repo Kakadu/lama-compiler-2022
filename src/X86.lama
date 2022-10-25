@@ -309,6 +309,12 @@ fun compile (env, code) {
           case env.allocate of
             [s, env] -> [env, code <+ Mov (L(n), s)]
           esac
+      | LABEL (lab) -> [env, code <+ Label (lab)]
+      | JMP (lab) -> [env, code <+ Jmp (lab)]
+      | CJMP (suffix, lab) ->
+          case env.pop of
+            [s, env] -> [env, code <+> if memOpnd (s) then move (s, eax) <+ Binop ("&&", eax, eax) else singletonBuffer (Binop ("&&", s, s)) fi <+ CJmp (suffix, lab)]
+          esac
       | BINOP (binop) ->
           case env.pop2 of
             [y, x, env] -> (

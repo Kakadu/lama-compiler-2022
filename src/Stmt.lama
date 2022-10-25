@@ -40,7 +40,9 @@ fun eval (c, stmt) {
       [st, writeWorld(exprResult, w)]
   )
   | If (cond, s1, s2)  -> if evalExpr(st, cond) then eval(c, s1) else eval(c, s2) fi
-  | While (cond, body) -> if evalExpr(st, cond) then eval(eval(c, body), stmt) else c fi
+  | While (cond, body) -> (
+    if evalExpr(st, cond) then eval(eval(c, body), stmt) else c fi
+  )
   | DoWhile (body, cond) -> eval(eval(c, body), While (cond, body))
   esac
 }
