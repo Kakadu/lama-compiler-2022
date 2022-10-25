@@ -34,8 +34,11 @@ var  stmt  = memo $ eta syntax (
       | kSkip { Skip }
       | kRead x=inbr[s("("), lident, s(")")] { Read (x) }
       | kWrite e=inbr[s("("), exp, s(")")] { Write (e) }
+      | kIf cond=exp kThen s1=stmt kElse s2=stmt kFi { If (cond, s1, s2) }
+      | kWhile cond=exp kDo s=stmt kOd { While (exp, s) }
+      | kDo s=stmt kWhile cond=exp kOd { DoWhile (s, cond) }
+      | kFor s1=stmt s[","] cond=exp s[","] s2=stmt kDo s3=stmts kOd { Seq (s1, While (cond, Seq (s3, s2))) }
 );
-   
 
 -- Public top-level parser
 public parse = stmt;
