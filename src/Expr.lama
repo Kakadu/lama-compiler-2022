@@ -6,16 +6,16 @@ import World;
 
 -- As association map which maps "\otimes" into "\oplus"
 var ops = {
-  ["+" , infix + ],
-  ["-" , infix - ],
-  ["*" , infix * ],
-  ["/" , infix / ],
-  ["%" , infix % ],
+  ["+", infix +],
+  ["-", infix -],
+  ["*", infix *],
+  ["/", infix /],
+  ["%", infix %],
   ["==", infix ==],
   ["!=", infix !=],
-  ["<" , infix < ],
+  ["<", infix <],
   ["<=", infix <=],
-  [">" , infix > ],
+  [">", infix >],
   [">=", infix >=],
   ["&&", infix &&],
   ["!!", infix !!]
@@ -53,18 +53,38 @@ public fun evalOp (op, l, r) {
 -- Returns the final configuration and the list of values
 fun evalList (c, exprs) {
   case foldl (fun ([c, vals], e) {
-                case eval (c, e) of
-                  [c, v] -> [c, v : vals]
-                esac
-              },
-              [c, {}],
-              exprs) of
+    case eval (c, e) of
+      [c, v] -> [c, v:vals]
+    esac
+  },
+    [c, {}],
+    exprs) of
     [c, vals] -> [c, reverse (vals)]
   esac
 }
 
 fun eval (c@[s, w], expr) {
-  failure ("evalExpr not implemented\n")
+  case expr of
+      Assn (l, r)          -> case evalList (c, {l, r}) of [[s, w], {Ref (x), v}] -> [[s <- [x, v], w], v] esac
+    | Skip                 -> [c, 0]
+    | Seq (s1, s2)         -> eval (eval (c, s1).fst, s2)
+    | Read (x)             -> case readWorld (w) of [v, w] -> [[s <- [x, v], w], 0] esac
+    | Write (e)            -> case eval (c, e) of [[s, w], v] -> [[s, writeWorld (v, w)], 0] esac
+    | Var (x)              -> [c, s (x)]
+    | Ref (x)              -> [c, Ref (x)]
+    | Const (n)            -> [c, n]
+    | Binop (op, l, r)     -> case evalList (c, {l, r}) of [c, {l, r}] -> [c, evalOp (op, l, r)] esac
+    | Ignore (e)           -> case eval (c, e) of [c, _] -> [c, 0] esac
+    | If (cond, body, el)  -> case eval (c, cond) of [c, 0] -> eval (c, el) | [c, #val] -> eval (c, body) esac
+    | While (cond, body)   -> case eval (c, cond) of
+                                  x@[c, 0]    -> x
+                                | [c, #val] -> eval (eval (c, body).fst, expr)
+                              esac
+    | DoWhile (body, cond) -> case eval (c, body) of [c, 0] -> case eval (c, cond) of
+                                                                   x@[c, 0]  -> x
+                                                                 | [c, #val] -> eval (c, expr) esac
+                              esac
+  esac
 }
 
 
