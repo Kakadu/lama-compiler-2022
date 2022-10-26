@@ -54,15 +54,11 @@ fun fromLabel (env, lab) {
 
 -- Stack machine interpreter. Takes an environment, an SM-configuration and a program,
 -- returns a final configuration
-fun eval(c, insns) {
+fun eval(env, c@[stack, state, w], insns) {
   fun evalInstruction(c, insn) {
-    var stack = c[0];
-    var state = c[1];
-    var w = c[2];
-
     case insn of
-      READ         -> (
-        case w.readWorld of [value, newW] -> [value : stack, state, newW] esac
+      READ           -> (
+        case w.readWorld of [value, newW] -> [value:stack, state, newW] esac
       )
       | WRITE        -> (
         [stack.tl, state, writeWorld(stack.hd, w)]
@@ -73,14 +69,26 @@ fun eval(c, insns) {
         var lArg = temp.hd;
         var stackTail = temp.tl;
         var value = evalBinop(binop)(lArg, rArg);
-        [value : stackTail, state, w]
+        [value:stackTail, state, w]
       )
-      | LD (x)       -> [state(x) : stack, state, w]
+      | LD (x)       -> [state(x):stack, state, w]
       | ST (x)       -> [stack.tl, state <- [x, stack.hd], w]
-      | CONST (n)    -> [n : stack, state, w]
+      | CONST (n)    -> [n:stack, state, w]
+      | LABEL (_) -> [stack, state, w]
     esac
   }
-  foldl(evalInstruction, c, insns)
+  case insns of
+    { }               -> c
+    | insn : insnRest ->
+      case insn of
+        CJMP (c, lab) ->
+          case stack of
+            v : stackRest -> eval(env, [stackRest, state, w], if v == c then fromLabel(env, lab) else insnRest fi)
+          esac
+        | JMP (lab)   -> eval(env, c, fromLabel(env, lab))
+        | _           -> eval(env, evalInstruction(c, insn), insnRest)
+      esac
+  esac
 }
 
 -- Runs a stack machine for a given input and a given program, returns an output
@@ -166,7 +174,32 @@ public fun compileSM (stmt) {
                   esac
              esac
         esac
-    | _              -> failure ("compileSM not implemented\n")
+      | While (e, s)   ->
+        case env.genLabel of
+          [sLab, env] -> case env.genLabel of [lab1, env] ->
+            case compile(lab1, env, s) of
+              [lab1Used, env, sCode] ->
+                [true, env, label(sLab, true) <+> compileExpr(e) <+ CJMP(0, lab) <+> sCode <+> label(lab1, lab1Used) <+ JMP(sLab)]
+            esac
+          esac esac
+      | If (e, s1, s2) ->
+        case env.genLabel of
+          [elseLab, env] -> case env.genLabel of [lab1, env] ->
+            case compile(lab1, env, s1) of
+              [lab1Used, env, s1Code] ->
+                case compile(lab, env, s2) of
+                  [_, env, s2Code] -> [true, env, compileExpr(e) <+ CJMP(0, elseLab) <+> s1Code <+> label(lab1, lab1Used) <+ JMP(lab) <+> label(elseLab, true) <+> s2Code]
+                esac
+            esac
+          esac esac
+      | DoWhile (s, e) ->
+        case env.genLabel of
+          [sLab, env] -> case env.genLabel of [lab1, env] ->
+            case compile(lab1, env, s) of
+              [lab1Used, env, sCode] -> [true, env, label(sLab, true) <+> sCode <+> label(lab1, lab1Used) <+> compileExpr(e) <+ CJMP(0, lab) <+ JMP(sLab)]
+            esac
+          esac esac
+      | _              -> failure("compileSM not implemented for %s\n", stmt.string)
     esac
   }
 

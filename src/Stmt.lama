@@ -37,6 +37,9 @@ fun eval(c, stmt) {
       var res = evalExpr(state, expr);
       [state, writeWorld(res, w)]
     )
+    | If (cond, stmt1, stmt2) -> if evalExpr (state, cond) then eval (c, stmt1) else eval (c, stmt2) fi
+    | While (cond, body) -> if evalExpr (state, cond) then eval (eval (c, body), stmt) else c fi
+    | DoWhile (body, cond) -> eval (eval (c, body), While (cond, body))
   esac
 }
 

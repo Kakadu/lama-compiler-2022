@@ -286,7 +286,7 @@ fun compile(env, code) {
     fun ([env, scode], i) {
       var code = scode <+ Meta("# " ++ showSMInsn(i) ++ "\n");
       case i of
-        READ         ->
+        READ           ->
           case env.allocate of
             [s, env] -> [env, code <+ Call("Lread") <+ Mov(eax, s)]
           esac
@@ -334,6 +334,24 @@ fun compile(env, code) {
           case env.allocate of
             [s, env] -> [env, code <+> move(L(n), s)]
           esac
+        | LABEL (l)   -> [env, code <+ Label(l)]
+        | CJMP (c, l) ->
+          case env.pop of
+            [s, env] -> [
+              env,
+              code
+                <+ Binop("cmp", L(0), s)
+                <+ CJmp(case c of
+                0 -> "z"
+              esac, l)
+            ]
+          esac
+        | JMP (l)     -> [
+          env,
+          code
+            <+ Jmp(l)
+        ]
+        | _           -> failure("codegeneration for instruction %s is not yet implemented\n", i.string)
       esac
     }, [env, emptyBuffer()], code)
 }

@@ -32,13 +32,27 @@ var primary = memo $ eta syntax (
   );
 
 var stmt = memo $ eta syntax (
-  x=lident -s[":="] v=exp { Assn(x, v) }                   |
-  stmt1=stmt -s[";"] stmt2=stmt -end { Seq(stmt1, stmt2) } |
-  -kSkip { Skip }                                          |
-  -kRead x=inbr[s("("), lident, s(")")] { Read(x) }        |
-  -kWrite v=inbr[s("("), exp, s(")")] { Write(v) }
+  x=lident -s[":="] v=exp { Assn(x, v) }                                |
+  -kSkip { Skip }                                                       |
+  -kRead x=inbr[s("("), lident, s(")")] { Read(x) }                     |
+  -kWrite v=inbr[s("("), exp, s(")")] { Write(v) }                      |
+  -kIf cond=exp -kThen stmt1=stmts stmt2=els { If(cond, stmt1, stmt2) } |
+  -kWhile cond=exp -kDo body=stmts -kOd { While(cond, body) }           |
+  -kFor stmt1=stmts -s[","] cond=exp -s[","] stmt2=stmts -kDo stmt3=stmts -kOd {
+    Seq(stmt1, While(cond, Seq(stmt3, stmt2)))
+  }                                                                     |
+  -kDo body=stmts -kWhile cond=exp -kOd { DoWhile(body, cond) }
+),
+  els = memo $ eta syntax (
+  -kFi { Skip }     |
+  -kElse stmts -kFi |
+  -kElif cond=exp -kThen stmt1=stmts stmt2=els { If(cond, stmt1, stmt2) }
+),
+  stmts = memo $ eta syntax (
+  stmt |
+  stmt1=stmt -s[";"] stmt2=stmts { Seq(stmt1, stmt2) }
 );
 
 
 -- Public top-level parser
-public parse = stmt;
+public parse = stmts;
