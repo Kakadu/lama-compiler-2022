@@ -382,6 +382,16 @@ fun compile (env, code) {
           case env.pop2 of
             [x, y, env] -> [ env.push (y), code <+> compileBinop (op, x, y)]
           esac
+      | LABEL (l) -> [env, code <+ Label (l)]
+      | JMP (l) -> [env, code <+ Jmp (l)]
+      | CJMP (0, l) ->
+        case env.pop of
+          [s, env] -> [env, code <+ Binop ("cmp", L(0), s) <+ CJmp ("z", l)]
+        esac
+      | CJMP (_, l) ->
+        case env.pop of
+          [s, env] -> [env, code <+ Binop ("cmp", L(0), s) <+ CJmp ("nz", l)]
+        esac
       esac
     }, [env, emptyBuffer ()], code)
 }

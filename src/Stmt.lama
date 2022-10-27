@@ -28,6 +28,9 @@ fun eval (c, stmt) {
   | Skip -> c
   | Read (s) -> var readen = readWorld(world); [state <- [s, readen[0]], readen[1]]
   | Write (expr) -> [state, writeWorld (evalExpr (state, expr), world)]
+  | If (cond, s1, s2) -> if evalExpr(state, cond) then eval(c, s1) else eval(c, s2) fi
+  | While (cond, body) -> if evalExpr(state, cond) then eval(eval(c, body), stmt) else c fi
+  | DoWhile (body, cond) -> var afterIter = eval (c, body); eval(afterIter, While (cond, body)) 
   esac
 }
 
