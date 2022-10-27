@@ -8,13 +8,13 @@ import Fun;
 import Manifest;
 
 -- Assembler language interface
--- The registers:
+-- The registers: 
 var regs = ["%ebx", "%ecx", "%esi", "%edi", "%eax", "%edx", "%ebp", "%esp"];
 
 -- We can not freely operate with all register; only with 4 by now
 var nRegs = regs.length - 5;
 
--- For convenience we define the following synonyms for the registers:
+-- For convenience we define the following synonyms for the registers: 
 var ebx = R(0),
     ecx = R(1),
     esi = R(2),
@@ -42,6 +42,9 @@ var wordSize = 4;
 --   Set   (string, string)     -- sets a value from flags; the first operand is the
 --                                 suffix, which determines the value being set, the
 --                                 the second --- (sub)register name
+--   Jmp   (string)             -- unconditional jump to a label
+--   CJmp  (string, string)     -- conditional jump to a label
+--   Label (string)             -- a label
 --   Push  (opnd)               -- pushes the operand on the hardware stack
 --   Pop   (opnd)               -- pops from the hardware stack to the operand
 --   Call  (string)             -- calls a function by its name
@@ -82,6 +85,9 @@ fun insnString(insn) {
     | Pop   (s)          -> sprintf("\tpopl\t%s\n", opndString(s))
     | Ret                -> "\tret\n"
     | Call  (p)          -> sprintf("\tcall\t%s\n", p)
+    | Label (l)          -> sprintf("%s:\n", l)
+    | Jmp   (l)          -> sprintf("\tjmp\t%s\n", l)
+    | CJmp  (c, l)       -> sprintf("\tj%s\t%s\n", c, l)
     | Meta  (m)          -> m
   esac
 }
@@ -200,7 +206,7 @@ fun getStackSize(env) {
 
 -- Creates an initial environment
 fun initEnv() {
-  makeEnv(0, 0, emptySet(compare))
+  makeEnv(0, emptySet(compare), emptySet(compare))
 }
 
 -- Codegeneration helper functions
@@ -280,63 +286,122 @@ fun compile(env, code) {
     fun ([env, scode], i) {
       var code = scode <+ Meta("# " ++ showSMInsn(i) ++ "\n");
       case i of
-        READ        ->
+        READ          ->
           case env.allocate of
             [s, env] -> [env, code <+ Call("Lread") <+ Mov(eax, s)]
           esac
-        | WRITE     ->
+        | WRITE       ->
           case env.pop of
             [s, env] -> [env, code <+ Push(s) <+ Call("Lwrite") <+ Pop(eax)]
           esac
-        | CONST (n) ->
+        | CONST (n)   ->
           case env.allocate of
             [s, env] -> [env, code <+> move(L(n), s)]
           esac
-        | LD (x)    ->
+        | LD (x)      ->
           case env.addGlobal(x).allocate of
             [s, env] -> [env, code <+> move(env.loc(x), s)]
           esac
-        | ST(x)     ->
+        | ST (x)      ->
           case env.addGlobal(x).pop of
             [s, env] -> [env, code <+> move(s, env.loc(x))]
           esac
-        | BINOP(op) ->
+        | BINOP (op)  ->
           case env.pop2 of
-            [y, x, env] -> [env.push(x), code <+>
+            [x, y, env] -> case env.allocate of [s, env] ->
+
+              fun compBinop(op) {
+                [env,
+                  code
+                    <+> move(x, eax)
+                    <+> move(y, edx)
+                    <+ Binop(op, eax, edx)
+                    <+> move(edx, s)
+                ]
+              }
+
+              fun compDiv(reg) {
+                [env,
+                  code
+                    <+> move(y, eax)
+                    <+> move(L(0), edx)
+                    <+ Cltd
+                    <+ IDiv(x)
+                    <+> move(reg, s)
+                ]
+              }
+
+              fun compComp(op) {
+                [
+                  env,
+                  code
+                    <+> move(x, eax)
+                    <+ Binop("cmp", eax, y)
+                    <+> move(L(0), eax)
+                    <+ Set(suffix(op), "%al")
+                    <+> move(eax, s)
+                ]
+              }
+
+              fun compLogic(op) {
+                [
+                  env,
+                  code
+                    <+> move(L(0), eax)
+                    <+ Binop("cmp", x, eax)
+                    <+ Set(suffix("!="), "%al")
+                    <+> move(L(0), edx)
+                    <+ Binop("cmp", y, edx)
+                    <+ Set(suffix("!="), "%dl")
+                    <+ Binop(op, eax, edx)
+                    <+> move(L(0), eax)
+                    <+ Set(suffix("!="), "%al")
+                    <+> move(eax, s)
+                ]
+              }
+
               case op of
-                "+"    -> move(x, eax) <+ Binop(op, y, eax) <+> move(eax, x)
-                | "-"  -> move(x, eax) <+ Binop(op, y, eax) <+> move(eax, x)
-                | "*"  -> move(x, eax) <+ Binop(op, y, eax) <+> move(eax, x)
-                | "/"  -> move(x, eax) <+ Cltd <+ IDiv(y) <+> move(eax, x)
-                | "%"  -> move(x, eax) <+ Cltd <+ IDiv(y) <+> move(edx, x)
-                | "<"  -> move(L(0), eax) <+> move(x, edx) <+ Binop("cmp", y, edx) <+ Set(suffix(op), "%al") <+> move(eax, x)
-                | ">"  -> move(L(0), eax) <+> move(x, edx) <+ Binop("cmp", y, edx) <+ Set(suffix(op), "%al") <+> move(eax, x)
-                | "<=" -> move(L(0), eax) <+> move(x, edx) <+ Binop("cmp", y, edx) <+ Set(suffix(op), "%al") <+> move(eax, x)
-                | ">=" -> move(L(0), eax) <+> move(x, edx) <+ Binop("cmp", y, edx) <+ Set(suffix(op), "%al") <+> move(eax, x)
-                | "==" -> move(L(0), eax) <+> move(x, edx) <+ Binop("cmp", y, edx) <+ Set(suffix(op), "%al") <+> move(eax, x)
-                | "!=" -> move(L(0), eax) <+> move(x, edx) <+ Binop("cmp", y, edx) <+ Set(suffix(op), "%al") <+> move(eax, x)
-                | "&&" -> (
-                  var e1_not_zero = move(L(0), eax) <+ Binop("cmp", eax, x) <+ Set(suffix("!="), "%al") <+> move(eax, x);
-                  var e2_not_zero = move(L(0), eax) <+ (Binop("cmp", eax, y)) <+ Set(suffix("!="), "%al") <+> move(eax, y);
-
-                  e1_not_zero <+> e2_not_zero <+> move(x, eax) <+ Binop(op, y, eax) <+> move(eax, x)
-                )
-                | "!!" -> (
-                  var e1_not_zero = move(L(0), eax) <+ Binop("cmp", eax, x) <+ Set(suffix("!="), "%al") <+> move(eax, x);
-                  var e2_not_zero = move(L(0), eax) <+ (Binop("cmp", eax, y)) <+ Set(suffix("!="), "%al") <+> move(eax, y);
-
-                  e1_not_zero <+> e2_not_zero <+> move(x, eax) <+ Binop(op, y, eax) <+> move(eax, x)
-                )
+                "*"    -> compBinop("*")
+                | "+"  -> compBinop("+")
+                | "-"  -> compBinop("-")
+                | "&&" -> compLogic("&&")
+                | "!!" -> compLogic("!!")
+                | "/"  -> compDiv(eax)
+                | "%"  -> compDiv(edx)
+                | "<"  -> compComp("<")
+                | "<=" -> compComp("<=")
+                | "==" -> compComp("==")
+                | "!=" -> compComp("!=")
+                | ">=" -> compComp(">=")
+                | ">"  -> compComp(">")
+                | _    -> failure("Binary operator %s not implemented\n", op)
               esac
+            esac esac
+
+        | LABEL (l)   -> [env, code <+ Label(l)]
+        | CJMP (c, l) ->
+          case env.pop of
+            [s, env] -> [
+              env,
+              code
+                <+ Binop("cmp", L(0), s)
+                <+ CJmp(case c of
+                0 -> "z"
+              esac, l)
             ]
           esac
-        | _         -> failure("codegeneration for instruction %s is not yet implemented\n", i.string)
+        | JMP (l)     -> [
+          env,
+          code
+            <+ Jmp(l)
+        ]
+        | _           -> failure("codegeneration for instruction %s is not yet implemented\n", i.string)
       esac
     }, [env, emptyBuffer()], code)
 }
 
--- A top-level codegeneration function. Takes a stack machine program
--- and returns x86 listing as a string
+-- A top-level codegeneration function. Takes a driver's environment and a stack machine program,
+-- compiles the program into machine code, and compiles the machine code into an executable
 public fun compileX86(args, code) {
   case compile(initEnv(), code) of
     [env, code] ->
