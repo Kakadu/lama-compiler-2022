@@ -8,6 +8,7 @@ import World;
 import State;
 import Expr;
 import Buffer;
+import Fun;
 
 -- Stack code printer. Takes a list of SM instructions, return its
 -- string representation.
@@ -52,10 +53,38 @@ fun fromLabel (env, lab) {
   env [0] (lab)
 }
 
--- Stack machine interpreter. Takes an environment, an SM-configuration and a program,
+-- Stack machine interpreter. Takes an SM-configuration and a program,
 -- returns a final configuration
-fun eval (env, c, insns) {
-  failure ("SM eval not implemented\n")
+fun eval (env, [stack, st, w], insns) {
+
+  fun evalLinear ([stack, state, world], ins) {
+     case ins of
+          LD (x)     -> [st (x) : stack, st, w]
+        | CONST (n)  -> [n : stack, st, w]
+        | BINOP (op) -> case stack of h : m : stack -> [binopEvaluator (op) (m, h) : stack, st, w] esac
+        | ST (x)     -> case stack of h : stack -> [stack, st <- [x, h], w] esac
+        | READ       -> case readWorld (w) of [n, w] -> [n : stack, st, w] esac
+        | WRITE      -> case stack of h : stack -> [stack, st, writeWorld (h, w)] esac
+        | LABEL (s) -> skip
+     esac
+  }
+
+  case insns of
+       ins : insns ->
+        case ins of
+          JMP (l) -> eval (env, [stack, st, w], fromLabel (env, l))
+        | CJMP (c, l) ->
+            case stack of
+              h : stack -> eval (
+                  env,
+                  [stack, st, w],
+                  if h == c then fromLabel (env, l) else insns fi
+                )
+            esac
+        | _ -> eval (env, evalLinear([stack, st, w], ins), insns)
+        esac
+      | {} -> [stack, st, w]
+  esac
 }
 
 -- Runs a stack machine for a given input and a given program, returns an output
@@ -96,7 +125,11 @@ fun genLabels (env, n) {
 -- Compiles an expression into a stack machine code.
 -- Takes an expression, returns a list of stack machine instructions
 fun compileExpr (expr) {
-  failure ("compileExpr not implemented\n")
+  case expr of
+    Var (x)          -> singletonBuffer (LD (x))
+  | Const (n)        -> singletonBuffer (CONST (n))
+  | Binop (op, l, r) -> compileExpr (l) <+> compileExpr (r) <+ BINOP (op)
+  esac
 }
 
 -- Compiles a statement into a stack machine code.
@@ -137,6 +170,55 @@ public fun compileSM (stmt) {
                   esac
              esac
         esac
+    | If (cond, thenStmt, elseStmt) ->
+      case env.genLabels(2) of
+        [thenLabel, elseLabel, env] ->
+          case compile(thenLabel, env, thenStmt) of
+            [_, env, thenCode] ->
+              case compile(elseLabel, env, elseStmt) of
+                [_, env, elseCode] ->
+                  [true, env, (
+                    compileExpr(cond)
+                    <+ CJMP (0, elseLabel)
+                    <+> thenCode
+                    <+> label(thenLabel, true)
+                    <+ JMP(lab)
+                    <+> label(elseLabel, true)
+                    <+> elseCode
+                  )]
+              esac
+          esac
+      esac
+    | While (cond, body) ->
+        case env.genLabels(2) of
+          [condLab, bodyLab, env] ->
+            case compile(condLab, env, body) of
+              [_, env, bodyCode] ->
+                [true, env, (
+                  label(condLab, true)
+                  <+> compileExpr(cond)
+                  <+ CJMP (0, lab)
+                  <+> bodyCode
+                  <+ JMP(condLab)
+                )]
+
+            esac
+        esac
+    | DoWhile (body, cond) ->
+        case env.genLabels(2) of
+          [bodyLab, condLab, env] ->
+             case compile(bodyLab, env, body) of
+               [_, env, bodyCode] ->
+                 [true, env, (
+                   label(condLab, true)
+                   <+> bodyCode
+                   <+> label(bodyLab, true)
+                   <+> compileExpr(cond)
+                   <+ CJMP(0, lab)
+                   <+ JMP(condLab)
+                 )]
+            esac
+       esac
     | _              -> failure ("compileSM not implemented\n")
     esac
   }  
