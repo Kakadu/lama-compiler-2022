@@ -28,13 +28,23 @@ var primary = memo $ eta syntax (x=decimal {Const (stringInt (x))} |
                                       [Left, map(binopParserHelper, {"*", "/", "%"})]},
                                       primary]);
 
+var parseElseSyntax = memo $ eta syntax (kElse s2=stmts { s2 } |
+                                         kElif cond1=exp kThen s2=stmts s3=parseElseSyntax { If (cond1, s2, s3) } |
+                                         empty {Skip}
+                                        );
+
 var stmt = memo $ eta syntax (kRead var_name=inbr[s("("), lident, s(")")] { Read (var_name) } |
                               kWrite e=inbr[s("("), exp, s(")")] { Write (e) } |
                               kSkip { Skip } |
-                              s1=stmt s[";"] s2=stmt end { Seq (s1, s2) } |
-                              var_name=lident s[":="] e=exp { Assn(var_name, e) }
-                              );
+                              var_name=lident s[":="] e=exp { Assn(var_name, e) } |
+                              kIf cond1=exp kThen s1=stmts s2=parseElseSyntax kFi { If (cond1, s1, s2) }|
+                              kWhile cond=exp kDo s=stmts kOd { While (cond, s) } |
+                              kDo s=stmts kWhile cond=exp kOd { DoWhile(s, cond) } |
+                              kFor init=stmts s[","] cond=exp s[","] mod=stmts kDo s=stmts kOd
+                                { Seq (init, While (cond, Seq (s, mod))) }
+                              ),
+      stmts = memo $ eta syntax (stmt | s1=stmt s[";"] s_other=stmts { Seq (s1, s_other) });
    
 
 -- Public top-level parser
-public parse = stmt;
+public parse = stmts;

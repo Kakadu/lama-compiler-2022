@@ -30,6 +30,9 @@ fun eval (c, stmt) {
     | Read  (var_name)          -> case readWorld(world) of [value, new_world]
                              -> [state <- [var_name, value], new_world] esac
     | Write (expr)           -> [state, writeWorld(evalExpr(state, expr), world)]
+    | If (cond, stmt1, stmt2) -> if evalExpr(state, cond) then eval(c, stmt1) else eval(c, stmt2) fi
+    | While (cond, smt_body) -> if evalExpr(state, cond) then eval(eval(c, smt_body), stmt) else c fi
+    | DoWhile (smt_body, cond) -> eval(eval(c, smt_body), While (cond, smt_body))
   esac
 }
 

@@ -287,15 +287,15 @@ fun compileBinop (op, l, r) {
   }
 
   fun compileCompareOp (op, l, r) {
-    emptyBuffer() <+ Mov (l, edi)
-                  <+ Binop ("cmp", r, edi)
+    emptyBuffer() <+ Mov (l, edx)
+                  <+ Binop ("cmp", r, edx)
                   <+ Mov (L (0), eax)
                   <+ Set (suffix(op), "%al") <+ Mov (eax, l)
   }
 
   fun compileDivOp (op, l, r) {
-     var buf = emptyBuffer() <+ Mov (r, edi) <+ Mov (l, eax) <+ Cltd
-                             <+ IDiv (edi);
+     var buf = emptyBuffer() <+ Mov (l, eax) <+ Cltd
+                             <+ IDiv (r);
 
     case op of
       "/" -> buf <+ Mov (eax, l)
@@ -368,8 +368,14 @@ fun compile (env, code) {
           case env.pop2 of
             [r, l, env] -> [env.push(l), code <+> compileBinop(op, l, r)]
           esac
+      | JMP (lbl) -> [env, code <+ Jmp (lbl)]
+      | CJMP (cond, lbl) -> 
+          case env.pop of
+            [s, env] -> [env, code <+ Mov (L (0), eax) <+ Binop ("cmp", eax, s) <+ CJmp (cond, lbl)]
+          esac
+      | LABEL (lbl) -> [env, code <+ Label (lbl)]
       esac
-    }, [env, emptyBuffer ()], getBuffer(code))
+    }, [env, emptyBuffer ()], code)
 }
 
 -- A top-level codegeneration function. Takes a driver's environment and a stack machine program,
