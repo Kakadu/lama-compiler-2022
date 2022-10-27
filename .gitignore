@@ -1,4 +1,5 @@
 *.i
 *.s
+*.o
 /regression
 /.idea
