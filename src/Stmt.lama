@@ -19,7 +19,7 @@ import World;
 --        While   (expr, stmt)       |
 --        DoWhile (stmt, expr)
 
-fun eval ([s, w], stmt) {
+fun eval (c@[s, w], stmt) {
   case stmt of
     Assn (name, expr) -> [s <- [name, evalExpr(s, expr)], w]
   | Seq (s1, s2) -> eval(eval([s, w], s1), s2)
@@ -31,17 +31,9 @@ fun eval ([s, w], stmt) {
       [s <- [name, value], newWorld]
     )
   | Write (expr) -> [s, writeWorld(evalExpr(s, expr), w)]
-  | If (cond, thenStmt, elseStmt) ->
-    case evalExpr(s, cond) of
-      0 -> eval ([s, w], elseStmt)
-      | _ -> eval ([s, w], thenStmt)
-    esac
-  | While (cond, stmt) ->
-    case evalExpr(s, cond) of
-      0 -> [s, w]
-      | _ -> eval (eval([s, w], stmt), While (cond, stmt))
-    esac
-  | DoWhile (st, e) -> eval (eval([s, w], stmt), While (e, st))
+  | If (cond, thenStmt, elseStmt) -> if evalExpr(s, cond) then eval([s, w], thenStmt) else eval([s, w], elseStmt) fi
+  | While (cond, body) -> if evalExpr(s, cond) then eval(eval([s, w], body), stmt) else [s, w] fi
+  | DoWhile (body, cond) -> eval(eval ([s, w], body), While (cond, body))
   esac
 }
 
