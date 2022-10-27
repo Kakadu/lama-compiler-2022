@@ -282,10 +282,14 @@ fun suffix (op) {
 -- Generates x86 instructions for binary operations
 fun compileBinop(op, x, y) {
 
-  fun compileBasic(op, x, y) {
-    if stackOpnd (x) && stackOpnd (y)
-    then singletonBuffer (Mov (y, eax) <+ Binop (op, x, eax) <+ Mov (eax, y))
-    else singletonBuffer (Binop (op, x, y))
+  -- Moves r to eax if r in memory and performs binop. Op must store result in r.
+  fun compileBasic (op, l, r) {
+    if memOpnd (l) && memOpnd (r) then
+      singletonBuffer(Mov (r, eax))
+      <+ Binop (op, l, eax)
+      <+ Mov (eax, r)
+    else
+      singletonBuffer( Binop (op, l, r) )
     fi
   }
 
@@ -381,7 +385,7 @@ fun compile (env, code) {
           esac
       | BINOP (op) ->
           case env.pop2 of
-            [x, y, env] -> [env.push (y), code <+> compileBinop (op, x, y)]
+            [x, y, env] -> [ env.push (y), code <+> compileBinop (op, x, y)]
           esac
       | LABEL (l) -> [env, code <+ Label (l)]
       | JMP (l) -> [env, code <+ Jmp (l)]
@@ -404,8 +408,8 @@ public fun compileX86 (args, code) {
     [env, code] ->
        var asmFile = args.getBaseName ++ ".s",
            runtime = case getEnv ("LAMA_RUNTIME") of
-                       #val  -> "../runtime/"
-                     | path  -> path
+                       #val -> "../runtime/"
+                     | path     -> path
                      esac ++ "/runtime.o";
        
        fwrite (asmFile,
