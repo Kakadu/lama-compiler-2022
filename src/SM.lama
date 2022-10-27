@@ -54,8 +54,11 @@ fun fromLabel (env, lab) {
 
 -- Stack machine interpreter. Takes an environment, an SM-configuration and a program,
 -- returns a final configuration
-fun eval (env, c, insns) {
-  failure ("SM eval not implemented\n")
+fun eval (c, insns) {
+  case insns of
+    {} -> c
+  | ins : insns -> eval(evalSMSingleIns(c, ins), insns)
+  esac
 }
 
 -- Runs a stack machine for a given input and a given program, returns an output
@@ -96,7 +99,11 @@ fun genLabels (env, n) {
 -- Compiles an expression into a stack machine code.
 -- Takes an expression, returns a list of stack machine instructions
 fun compileExpr (expr) {
-  failure ("compileExpr not implemented\n")
+   case expr of
+    Var (v)           -> {LD (v)}
+  | Const (c)         -> {CONST (c)}
+  | Binop (b, exp1, exp2) -> compileExpr(exp1) +++ compileExpr(exp2) +++ {BINOP (b)}
+  esac
 }
 
 -- Compiles a statement into a stack machine code.
