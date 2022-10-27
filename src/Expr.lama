@@ -30,10 +30,11 @@ public fun evalBinop(binop, lop, rop) {
   | "!!" -> lop !! rop
   esac
 }
+
 public fun evalExpr (st, expr) {
   case expr of
-   Var (v) -> st(v)
-  | Const (num) -> num
-  | Binop (binop, exp1, exp2) -> evalBinop(binop, evalExpr(st, exp1), evalExpr(st, exp2))
-  esac
+    Var (v) -> st(v)                 |
+    Const (c) -> c                   |
+    Binop (op, x, y) -> evalBinop(op, evalExpr(st, x), evalExpr(st, y))
+  esac        
 }
