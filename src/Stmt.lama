@@ -19,9 +19,7 @@ import World;
 --        While   (expr, stmt)       |
 --        DoWhile (stmt, expr)
 
-fun eval (c, stmt) {
-  var state = c[0], w = c[1];
-
+fun eval (c@[state, w], stmt) {
   case stmt of
     Assn  (var_name, expr) -> [state <- [var_name, evalExpr (state, expr)], w]
   | Seq   (stmt1, stmt2)   -> eval (eval (c, stmt1), stmt2)
@@ -29,6 +27,12 @@ fun eval (c, stmt) {
   | Read  (var_name)       ->
       case readWorld (w) of [value, w] -> [state <- [var_name, value], w] esac
   | Write (expr)           -> [state, writeWorld (evalExpr (state, expr), w)]
+  | If (expr, stmt1, stmt2) ->
+      if evalExpr (state, expr) then eval (c, stmt1) else eval (c, stmt2) fi
+  | While (expr, loop_stmt) ->
+      if evalExpr (state, expr) then eval (eval (c, loop_stmt), stmt) else c fi
+  | DoWhile (loop_stmt, expr) ->
+      eval (eval (c, loop_stmt), While (expr, loop_stmt))
   esac
 }
 

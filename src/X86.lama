@@ -279,13 +279,14 @@ fun suffix (op) {
   esac
 }
 
+fun zeroReg (r) { Binop ("^", r, r) }
+
 fun compileBinop(op, x, y, env, code, s) {
   fun compileArithmetic (op) {
     code <+ Mov (y, edx) <+ Binop (op, x, edx) <+ Mov (edx, s)
   }
 
   var cmp = "cmp", al = "%al", dl = "%dl";
-  fun zeroReg (r) { Binop ("^", r, r) }
 
   fun compileComparison (op) {
     code <+ zeroReg (eax) <+ Mov (y, edx) <+ Binop (cmp, x, edx)
@@ -360,6 +361,12 @@ fun compile (env, code) {
               case env.allocate of [s, env] ->
                 compileBinop (op, x, y, env, code, s)
               esac
+           esac
+      | LABEL (l) -> [env, code <+ Label (l)]
+      | JMP (l) -> [env, code <+ Jmp (l)]
+      | CJMP (c, l) ->
+          case env.pop of [s, env] ->
+              [env, code <+ zeroReg (edx) <+ Binop("cmp", edx, s) <+ CJmp (c, l)]
           esac
       | _ -> failure ("codegeneration for instruction %s is not yet implemented\n", i.string)
       esac
