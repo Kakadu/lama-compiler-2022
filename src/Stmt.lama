@@ -26,6 +26,25 @@ fun eval (c @ [state, world], stmt) {
     | Skip              -> c
     | Read(x)           -> case readWorld(world) of [value, world] -> [state <- [x, value], world] esac
     | Write(expr)       -> [state, writeWorld(evalExpr(state, expr), world)]
+    | If (expr, then_body, else_body)  ->
+      if evalExpr(stmt, expr)
+        then
+          eval(c, then_body)
+        else
+          eval(c, else_body)
+      fi
+    | While (expr, while_body)   ->
+      while evalExpr(stmt, expr) do
+        c := eval(c, while_body);
+        stmt := c.fst
+      od;
+      c
+    | DoWhile (while_body, expr) ->
+      do
+        c := eval(c, while_body);
+        stmt := c.fst
+      while evalExpr(stmt, expr) od;
+      c
     | _                 -> failure("Unexpected statement!")
   esac
 }

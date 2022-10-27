@@ -336,6 +336,14 @@ fun compile (env, code) {
           case env.addGlobal(x).pop of
             [s, env] -> [env, code <+> move (s, env.loc (x))]
           esac
+        | LABEL (l)    -> [env, code <+ Label(l)]
+        | JMP (l)      -> [env, code <+ Jmp(l)]
+        | CJMP (c, l)  ->
+          case env.pop of
+            [s, env] -> [env, code
+              <+ Binop("cmp", L(0), s)
+              <+ CJmp(c, l)]
+          esac
         | _ -> failure ("Unexpected instruction!")
       esac
     }, [env, emptyBuffer ()], code)

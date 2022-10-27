@@ -4,7 +4,6 @@ import Ostap;
 import Lexer;
 import List;
 import Fun;
-import Matcher;
 
 -- A parser of "something" in brackets; l, r are left and right
 -- brackets as parsers, p --- a parser of "something"
@@ -31,11 +30,25 @@ var primary = memo $ eta (decimal @ fun (x) {Const (stringInt (x))} |
     primary);
 
 var stmt = memo $ eta syntax (
-  s1=stmt s[";"] s2=stmt end { Seq(s1, s2) }
-  | kSkip { Skip }
+  kSkip { Skip }
   | x=lident s[":="] e=exp { Assn(x, e) }
   | kRead x=inbr[s("("), lident, s(")")] { Read(x) }
   | kWrite e=inbr[s("("), exp, s(")")] { Write(e) }
+  | kIf cond=exp kThen then_body=stmt_seq else_body=else_stmt { If(cond, then_body, else_body) }
+  | kWhile cond=exp kDo body=stmt_seq kOd { While(cond, body) }
+  | kDo body=stmt_seq kWhile cond=exp kOd { DoWhile(body, cond) }
+  | kFor init=stmt_seq s[","] cond=exp s[","] act_after_loop=stmt_seq kDo body=stmt_seq kOd { Seq(init, While(cond, Seq(body, act_after_loop))) }
+);
+
+var else_stmt = memo $ eta syntax(
+  kFi { Skip }
+  | kElse body=stmt_seq kFi { body }
+  | kElif cond=exp kThen then_body=stmt_seq else_body=else_stmt { If(cond, then_body, else_body) }
+);
+
+var stmt_seq = memo $ eta syntax(
+  s1=stmt s[";"] s2=stmt_seq { Seq(s1, s2) }
+  | s=stmt { s }
 );
 
 -- Public top-level parser
