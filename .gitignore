@@ -1,2 +1,8 @@
 *.i
 *.s
+
+regression/
+
+*.o
+
+src/lama-impl
