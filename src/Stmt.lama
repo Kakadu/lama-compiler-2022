@@ -35,7 +35,10 @@ fun eval (c@[st, w], stmt) {
     var v = evalExpr(st,e); 
     var new_w = writeWorld(v, w); 
     [st, new_w]
-  esac
+  | While (s, e) -> if evalExpr(st, s) then eval (eval (c, e), stmt) else c fi
+  | If (e, s1, s2) -> if evalExpr(st, e) then eval (c, s1) else eval (c, s2) fi
+  | DoWhile (e, s) -> eval (eval (c, e), While (s, e))
+  esac  
 }
 
 -- Evaluates a program with a given input and returns an output
