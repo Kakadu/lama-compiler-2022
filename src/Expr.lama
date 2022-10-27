@@ -4,6 +4,25 @@ import List;
 import State;
 
 
+-- Evaluate binop. Takes binop string representation and operands.
+fun evalBinop(binop, l, r) {
+  case binop of
+    "+" -> l + r
+  | "-" -> l - r
+  | "*" -> l * r
+  | "/" -> l / r
+  | "%" -> l % r
+  | "<" -> l < r
+  | ">" -> l > r
+  | "<=" -> l <= r
+  | ">=" -> l >= r
+  | "==" -> l == r
+  | "!=" -> l != r
+  | "&&" -> l && r
+  | "!!" -> l !! r
+  esac
+}
+
 -- The evaluator itself: takes a state and an expression,
 -- returns integer value
 --
@@ -14,5 +33,9 @@ import State;
 --        Binop (string, expr, expr)
 
 public fun evalExpr (st, expr) {
-  failure ("evalExpr not implemented\n")
+  case expr of
+    Var (v) -> st(v)
+  | Const (num) -> num
+  | Binop (binop, e1, e2) -> evalBinop(binop, evalExpr(st, e1), evalExpr(st, e2))
+  esac
 }

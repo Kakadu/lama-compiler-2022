@@ -52,10 +52,59 @@ fun fromLabel (env, lab) {
   env [0] (lab)
 }
 
--- Stack machine interpreter. Takes an environment, an SM-configuration and a program,
+-- Evaluate binop. Takes string representation of the binop and operands.
+fun evalBinop(binop, l, r) {
+  case binop of
+    "+" -> l + r
+  | "-" -> l - r
+  | "*" -> l * r
+  | "/" -> l / r
+  | "%" -> l % r
+  | "<" -> l < r
+  | ">" -> l > r
+  | "<=" -> l <= r
+  | ">=" -> l >= r
+  | "==" -> l == r
+  | "!=" -> l != r
+  | "&&" -> l && r
+  | "!!" -> l !! r
+  esac
+}
+
+fun condSatisfied (value, suf) {
+  case [suf, value] of
+    ["z",  0] -> true
+  | ["z",  _] -> false
+  | ["nz", 0] -> false
+  | ["nz", _] -> true
+  esac
+}
+
+-- Stack machine interpreter. Takes an SM-configuration and a program,
 -- returns a final configuration
-fun eval (env, c, insns) {
-  failure ("SM eval not implemented\n")
+fun eval (env, c@[stack, state, w], insns) {
+  case insns of
+    {} -> c
+  | ins : insns ->
+      case ins of
+        READ         -> case readWorld(w) of [v, w] -> eval(env, [v : stack, state, w], insns) esac
+      | WRITE        -> case stack of v : stack -> eval(env, [stack, state, writeWorld(v, w)], insns) esac
+      | BINOP (s)    -> case stack of r : l : stack -> eval(env, [evalBinop(s, l, r) : stack, state, w], insns) esac
+      | LD    (x)    -> eval(env, [state(x) : stack, state, w], insns)
+      | ST    (x)    -> case stack of v : stack -> eval(env, [stack, state <- [x, v], w], insns) esac
+      | CONST (n)    -> eval(env, [n : stack, state, w], insns)
+      | LABEL (s)    -> eval(env, c, insns)
+      | JMP   (l)    -> eval(env, c, fromLabel(env, l))
+      | CJMP  (s, l) ->
+          case stack of v : stack ->
+            if condSatisfied(v, s) then
+              eval(env, [stack, state, w], fromLabel(env, l))
+            else
+              eval(env, [stack, state, w], insns)
+            fi
+          esac
+      esac
+  esac
 }
 
 -- Runs a stack machine for a given input and a given program, returns an output
@@ -96,7 +145,11 @@ fun genLabels (env, n) {
 -- Compiles an expression into a stack machine code.
 -- Takes an expression, returns a list of stack machine instructions
 fun compileExpr (expr) {
-  failure ("compileExpr not implemented\n")
+  case expr of
+    Var (v) -> singletonBuffer(LD (v))
+  | Const (num) -> singletonBuffer(CONST (num))
+  | Binop (binop, e1, e2) -> compileExpr(e1) <+> compileExpr(e2) <+ BINOP (binop)
+  esac
 }
 
 -- Compiles a statement into a stack machine code.
@@ -137,7 +190,37 @@ public fun compileSM (stmt) {
                   esac
              esac
         esac
-    | _              -> failure ("compileSM not implemented\n")
+    | If (e, s1, s2) ->
+        case env.genLabel of [s1End, env] ->
+          case env.genLabel of [s2Start, env] ->
+            case compile (s1End, env, s1) of [s1EndUsed, env, s1Code] ->
+              case compile (lab, env, s2) of [_, env, s2Code] ->
+                [true, env, compileExpr(e) <+ CJMP ("z", s2Start) <+> s1Code <+> label(s1End, s1EndUsed)
+                            <+ JMP(lab) <+ LABEL(s2Start) <+> s2Code]
+              esac
+            esac
+          esac
+        esac
+
+    | While (e, s) ->
+        case env.genLabel of [startLab, env] ->
+          case env.genLabel of [condLab, env] ->
+            case compile(condLab, env, s) of [_, env, sCode] ->
+              [false, env, listBuffer({JMP (condLab), LABEL (startLab)}) <+> sCode <+ LABEL (condLab)
+                           <+> compileExpr(e)  <+ CJMP ("nz", startLab)]
+
+            esac
+          esac
+        esac
+    | DoWhile (s, e) ->
+        case env.genLabel of [bodyLab, env] ->
+          case env.genLabel of [sEnd, env] ->
+            case compile(sEnd, env, s) of [sEndUsed, env, sCode] ->
+              [false, env, singletonBuffer(LABEL (bodyLab)) <+> sCode <+> label(sEnd, sEndUsed)
+                           <+> compileExpr(e) <+ CJMP ("nz", bodyLab)]
+            esac
+          esac
+        esac
     esac
   }  
 
