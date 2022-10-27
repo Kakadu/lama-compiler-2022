@@ -1,2 +1,14 @@
 *.i
 *.s
+
+regression/deep-expressions/
+
+regression/expressions/
+
+regression/
+
+runtime/
+
+*.o
+
+src/lama-impl
