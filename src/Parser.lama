@@ -52,14 +52,14 @@ var elseItem = memo $ eta syntax (
 
 var stmtItem = memo $ eta syntax (
     x=lident s[":="] e=exp { Assn (x, e) }
-  -- | stmt1=stmt s[";"] stmt2=stmt end { Seq (stmt1, stmt2) }
-  | kSkip {Skip}
+  | kSkip { Skip }
   | kRead x=inbr[s ("("), lident, s (")")] { Read (x) }
   | kWrite e=inbr[s ("("), exp, s (")")] { Write (e) }
-  | kIf e=exp kThen stmt1=stmt el=elseItem { If (e, stmt1, el) }
-  | kWhile e=exp kDo stmt1=stmt kOd { While (e, stmt1) }
-  | kDo stmt1=stmt kWhile e=exp kOd { DoWhile (stmt1, e) }
-  | kFor stmt1=stmt s[","] e=exp s[","] stmt2=stmt kDo stmt3=stmt kOd { Seq (stmt1, While (e, Seq (stmt3, stmt2))) }
+  | kIf cond=exp kThen statement=stmt elseEnd=elseItem { If (cond, statement, elseEnd) }
+  | kWhile cond=exp kDo statement=stmt kOd { While (cond, statement) }
+  | kDo statement=stmt kWhile cond=exp kOd { DoWhile (statement, cond) }
+  | kFor decl=stmt s[","] cond=exp s[","] succ=stmt kDo statement=stmt kOd 
+    { Seq (decl, While (cond, Seq (statement, succ))) }
 );
 
 var stmt = memo $ eta syntax (

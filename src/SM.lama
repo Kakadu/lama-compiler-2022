@@ -56,8 +56,6 @@ fun fromLabel (env, lab) {
 -- returns a final configuration
 fun eval (env, c, insns) {
   fun eval ([stack, st, w], insns) {
-    -- printf ("Eval insn: %s\n", case insns of i : _ -> showSMInsn (i) | _ -> "nil" esac);
-    -- printf ("conf: [%s, %s, %s]\n", stack.string, map (fun (x) {st (x).string}, {"i", "j", "s"}).stringcat, w.string);
     case insns of
       {}                       -> [stack, st, w]
     | JMP (lab) : _            -> eval ([stack, st, w], env.fromLabel (lab))
@@ -211,7 +209,6 @@ public fun compileSM (stmt) {
                            LABEL (condLabel) <+>
                            compileExpr (cond) <+
                            CJMP ("nz", bodyLabel)
-              
               ]
           esac
       esac
