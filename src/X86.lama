@@ -351,6 +351,7 @@ fun compileBinop(op, x, y) {
   esac
 }
 
+
 -- Compiles stack machine code into a list of x86 instructions. Takes an environment
 -- and stack machine code, returns an updated environment and x86 code.
 fun compile (env, code) {
@@ -384,9 +385,9 @@ fun compile (env, code) {
           esac
       | LABEL (l) -> [env, code <+ Label (l)]
       | JMP (l) -> [env, code <+ Jmp (l)]
-      | CJMP (i, l) ->
+      | CJMP (0, l) ->
         case env.pop of
-          [s, env] -> [env, code <+> Binop ("cmp", L(0), s) <+ CJmp ("z", l)]
+          [s, env] -> [env, code <+ Binop ("cmp", L(0), s) <+ CJmp ("z", l)]
         esac
       | CJMP (_, l) ->
         case env.pop of
