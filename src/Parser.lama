@@ -32,6 +32,13 @@ binops = memo $ eta syntax (
     s ["<"] | s [">="] | s [">"]
 );
 
+var ifstmt = memo $ eta syntax (
+    e=exp kThen s1=stmt 
+    s2=alt [kElif |> lift (ifstmt), kElse |> lift (stmt)] 
+    {If (e, s1, s2)}
+  | e=exp kThen s1=stmt {If (e, s1, Skip)} 
+);
+
 var stmt = memo $ eta syntax (
     s1 = unostmt s [";"] s2 = stmt {Seq (s1, s2)} 
   | unostmt 
@@ -41,7 +48,11 @@ unostmt = memo $ eta syntax (
     kRead  x=inbr [s ("("), lident, s (")")] {Read (x)}
   | kWrite x=inbr [s ("("), exp,    s (")")] {Write (x)}
   | l=lident s [":="] r=exp {Assn (l, r)}
-  -- | kSkip {Skip}
+  | kSkip {Skip}
+  | kIf s=ifstmt kFi {s}
+  | kWhile e=exp kDo s=stmt kOd {While (e, s)}
+  | kDo s=stmt kWhile e=exp kOd {DoWhile (s, e)}
+  | kFor s1=stmt s [","] e=exp s [","] s2=stmt kDo s3=stmt kOd {Seq (s1, While (e, Seq (s3, s2)))}
 );
 
 -- Public top-level parser

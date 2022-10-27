@@ -305,11 +305,14 @@ fun compile (env, code) {
                 | "+"  -> [env, code <+> move (s2, eax) <+ Binop (op, s1, eax) <+> move (eax, s)]
                 | "-"  -> [env, code <+> move (s2, eax) <+ Binop (op, s1, eax) <+> move (eax, s)]
                 | "*"  -> [env, code <+> move (s2, eax) <+ Binop (op, s1, eax) <+> move (eax, s)]
-                | "&&" -> [env, code <+> move (s1, eax) <+ Binop (op, s1, eax) <+> move (L (0), eax) <+ Set ("ne", "%al")
-                                <+> move (s2, edx) <+ Binop (op, s2, edx) <+> move (L (0), edx) <+ Set ("ne", "%dl")
-                                <+ Binop (op, eax, edx) <+ Set ("ne", "%al") <+> move (eax, s)]
-                | "!!" -> [env, code <+> move (s2, eax) <+ Binop (op, s1, eax) <+> move (L (0), eax) <+ Set ("ne", "%al") <+> move (eax, s)]
-                |  _  -> [env, code <+> move (s2, eax) <+ Binop ("cmp", s1, eax) <+> move (L (0), eax) <+ Set (suffix (op), "%al") <+> move (eax, s)]
+                | "&&" -> [env, code <+> move (s1, eax) <+ Binop (op, s1, eax) <+> move (L (0), eax) 
+                                <+ Set ("ne", "%al") <+> move (s2, edx) <+ Binop (op, s2, edx) 
+                                <+> move (L (0), edx) <+ Set ("ne", "%dl") <+ Binop (op, eax, edx) 
+                                <+ Set ("ne", "%al") <+> move (eax, s)]
+                | "!!" -> [env, code <+> move (s2, eax) <+ Binop (op, s1, eax) <+> move (L (0), eax) 
+                                <+ Set ("ne", "%al") <+> move (eax, s)]
+                |  _  ->  [env, code <+> move (s2, eax) <+ Binop ("cmp", s1, eax) <+> move (L (0), eax) 
+                                <+ Set (suffix (op), "%al") <+> move (eax, s)]
                 esac
             esac
         esac
@@ -324,6 +327,12 @@ fun compile (env, code) {
       | CONST (n) -> 
         case env.allocate of
           [s, env] -> [env, code <+> move (L (n), s)]
+        esac
+      | LABEL (s)    -> [env, code <+ Label (s)]
+      | JMP   (l)    -> [env, code <+ Jmp (l)]
+      | CJMP  (c, l) -> 
+        case env.pop of
+          [s, env] -> [env, code <+> move (s, eax) <+ Binop ("cmp", L (0), eax) <+ CJmp (c, l)]
         esac
       esac
     }, [env, emptyBuffer ()], code)

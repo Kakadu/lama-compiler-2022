@@ -30,6 +30,12 @@ fun eval (c@[st, w], stmt) {
     esac
   | Write (expr) -> 
     [st, writeWorld (evalExpr(st, expr), w)]
+  | While (expr, stmt1) -> 
+    if evalExpr (st, expr) then eval (eval (c, stmt1), stmt) else c fi
+  | DoWhile (stmt1, expr) -> 
+    eval (eval (c, stmt1), While (expr, stmt1))
+  | If (expr, stmt1, stmt2) ->
+    if evalExpr (st, expr) then eval (c, stmt1) else eval (c, stmt2) fi
   esac
 }
 
