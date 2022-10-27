@@ -10,7 +10,11 @@ jobs:
     steps:
       - name: Check Deadline
         run: |
+<<<<<<< HEAD
           deadline=2022-10-27T23:59
+=======
+          deadline=2022-10-19T23:59
+>>>>>>> A03-straight-line-parser
           if [[ $(date +'%Y-%m-%d') > $deadline ]];
           then
               echo "FIASCO: The deadline has expired"
