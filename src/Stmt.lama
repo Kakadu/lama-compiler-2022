@@ -20,26 +20,31 @@ import World;
 --        DoWhile (stmt, expr)
 
 fun eval (c, stmt) {
-  var state = c[0];
   case stmt of
-      Assn (s, expr) -> (
-        state := (state <- [s, evalExpr(state, expr)])
-      )
-    | Seq (x, y) -> eval(c, x); eval(c, y)
-    | Skip -> skip
-    | Read (s) -> (
+      Assn (s, expr) -> [c[0] <- [s, evalExpr(c[0], expr)], c[1]]
+    | Seq (x, y) -> eval(eval(c, x), y)
+    | Skip -> c
+    | Read (s) -> 
         var k = readWorld(c[1]);
-        c[1] := k[1];
-        state := (state <- [s, k[0]])
-      )
-    | Write (expr) -> (
-      var r;
-      r := evalExpr(state, expr);
-      c[1] := writeWorld(r, c[1])
-    )
-  esac;
-  c[0] := state;
-  c
+        [c[0] <- [s, k[0]], k[1]]
+    | Write (expr) -> [c[0], writeWorld(evalExpr(c[0], expr), c[1])]
+    | While (expr, stmt) -> 
+        while evalExpr(c[0], expr) do
+          c:=eval(c, stmt)
+        od;
+        c
+    | DoWhile (stmt, expr) -> 
+        do
+        c := eval(c, stmt)
+        while evalExpr(c[0], expr) od;
+        c
+    | If (expr, stmt1, stmt2) ->
+        if evalExpr(c[0], expr) then
+          eval(c, stmt1)
+        else
+          eval(c, stmt2)
+        fi
+  esac
 }
 
 -- Evaluates a program with a given input and returns an output

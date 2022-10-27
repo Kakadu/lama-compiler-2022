@@ -384,6 +384,15 @@ fun compile (env, code) {
           case env.pop2 of
             [x, y, env] -> compileBinOp(env, code, op, x, y)
           esac
+      | JMP (s) -> 
+          [env, code <+ Jmp (s)]
+      | LABEL (l) -> 
+          [env, code <+ Label (l)]
+      | CJMP (s, l) -> 
+          case env.pop of
+            [x, env] -> 
+                  [env, code <+> move(x, eax) <+ Binop ("&&", eax, eax) <+ CJmp (s, l)]
+          esac
       | _ -> failure ("codegeneration for instruction %s is not yet implemented\n", i.string)
         esac
     }, [env, emptyBuffer ()], code)}
