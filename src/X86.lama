@@ -289,14 +289,57 @@ fun compile (env, code) {
         READ ->
           case env.allocate of
             [s, env] -> [env, code <+ Call ("Lread") <+ Mov (eax, s)]
-          esac             
-      | WRITE ->
+          esac
+        | WRITE ->
           case env.pop of
             [s, env] -> [env, code <+ Push (s) <+ Call ("Lwrite") <+ Pop (eax)]
           esac
-      | _ -> failure ("codegeneration for instruction %s is not yet implemented\n", i.string)
-        esac
-    }, [env, emptyBuffer ()], code)}
+        | CONST (n) ->
+          case env.allocate of
+            [s, env] -> [env, code <+> move (L (n), s)]
+          esac
+        | BINOP (op)    ->
+          case env.pop2 of
+            [expr2, expr1, env] -> [env.push (expr1), code <+>
+              case op of
+                "+"    -> move (expr1, eax) <+ Binop (op, expr2, eax) <+> move (eax, expr1)
+                | "-"  -> move (expr1, eax) <+ Binop (op, expr2, eax) <+> move (eax, expr1)
+                | "*"  -> move (expr1, eax) <+ Binop (op, expr2, eax) <+> move (eax, expr1)
+                | "/"  -> move (expr1, eax) <+ Cltd <+ IDiv(expr2) <+> move (eax, expr1)
+                | "%"  -> move (expr1, eax) <+ Cltd <+ IDiv(expr2) <+> move (edx, expr1)
+                | "<"  -> move (L (0), eax) <+> move (expr1, edx) <+ Binop ("cmp", expr2, edx) <+ Set (suffix (op), "%al") <+> move (eax, expr1)
+                | ">"  -> move (L (0), eax) <+> move (expr1, edx) <+ Binop ("cmp", expr2, edx) <+ Set (suffix (op), "%al") <+> move (eax, expr1)
+                | "<=" -> move (L (0), eax) <+> move (expr1, edx) <+ Binop ("cmp", expr2, edx) <+ Set (suffix (op), "%al") <+> move (eax, expr1)
+                | ">=" -> move (L (0), eax) <+> move (expr1, edx) <+ Binop ("cmp", expr2, edx) <+ Set (suffix (op), "%al") <+> move (eax, expr1)
+                | "==" -> move (L (0), eax) <+> move (expr1, edx) <+ Binop ("cmp", expr2, edx) <+ Set (suffix (op), "%al") <+> move (eax, expr1)
+                | "!=" -> move (L (0), eax) <+> move (expr1, edx) <+ Binop ("cmp", expr2, edx) <+ Set (suffix (op), "%al") <+> move (eax, expr1)
+                | "&&" -> (
+                  var expr1_is_not_zero = move (L (0), eax) <+ Binop ("cmp", eax, expr1) <+ Set (suffix ("!="), "%al") <+> move (eax, expr1);
+                  var expr2_is_not_zero = move (L (0), eax) <+ Binop ("cmp", eax, expr2) <+ Set (suffix ("!="), "%al") <+> move (eax, expr2);
+
+                  expr1_is_not_zero <+> expr2_is_not_zero <+> move (expr1, eax) <+ Binop (op, expr2, eax) <+> move (eax, expr1)
+                )
+                | "!!" -> (
+                  var expr1_is_not_zero = move (L (0), eax) <+ Binop ("cmp", eax, expr1) <+ Set (suffix ("!="), "%al") <+> move (eax, expr1);
+                  var expr2_is_not_zero = move (L (0), eax) <+ Binop ("cmp", eax, expr2) <+ Set (suffix ("!="), "%al") <+> move (eax, expr2);
+
+                  expr1_is_not_zero <+> expr2_is_not_zero <+> move (expr1, eax) <+ Binop (op, expr2, eax) <+> move (eax, expr1)
+                )
+              esac
+            ]
+          esac
+        | LD (x)    ->
+          case env.addGlobal(x).allocate of
+            [s, env] -> [env, code <+> move (env.loc (x), s)]
+          esac
+        | ST (x)     ->
+          case env.addGlobal(x).pop of
+            [s, env] -> [env, code <+> move (s, env.loc (x))]
+          esac
+        | _ -> failure ("Unexpected instruction!")
+      esac
+    }, [env, emptyBuffer ()], code)
+}
 
 -- A top-level codegeneration function. Takes a driver's environment and a stack machine program,
 -- compiles the program into machine code, and compiles the machine code into an executable
