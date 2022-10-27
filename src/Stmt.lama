@@ -26,6 +26,9 @@ fun eval (c@[state, world], stmt) {
   | Skip           -> c
   | Read (s)       -> case readWorld (world) of [v, w] -> [state <- [s, v], w] esac
   | Write (expr)   -> [state, writeWorld (evalExpr (state, expr), world)]
+  | If (e, s1, s2) -> if evalExpr(state, e) then eval(c, s1) else eval(c, s2) fi
+  | While (e, s)   -> if evalExpr(state, e) then eval(eval(c, s), stmt) else c fi
+  | DoWhile (s, e) -> eval(eval(c, s), While (e, s))
   esac
 }
 

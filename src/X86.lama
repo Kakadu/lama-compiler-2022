@@ -353,8 +353,13 @@ fun compile (env, code) {
           case env.pop2 of
             [lhs, rhs, env] -> [env.push (rhs), code <+> compileBinOp (op, lhs, rhs)]
           esac
-      | _ -> failure ("codegeneration for instruction %s is not yet implemented\n", i.string)
-        esac
+      | LABEL (l) -> [env, code <+ Label (l)]
+      | JMP (l) -> [env, code <+ Jmp (l)]
+      | CJMP (c, l) ->
+          case env.pop of
+            [s, env] -> [env, code <+ Mov (L (0), eax) <+ Binop ("cmp", eax, s) <+ CJmp (c, l)]
+          esac
+      esac
     }, [env, emptyBuffer ()], code)}
 
 -- A top-level codegeneration function. Takes a driver's environment and a stack machine program,
