@@ -294,8 +294,47 @@ fun compile (env, code) {
           case env.pop of
             [s, env] -> [env, code <+ Push (s) <+ Call ("Lwrite") <+ Pop (eax)]
           esac
-      | _ -> failure ("codegeneration for instruction %s is not yet implemented\n", i.string)
+      | BINOP (op) -> 
+        case env.pop2 of
+          [y, x, env] ->
+            var insns =
+              if compare(op, "+") == 0 !! compare(op, "-") == 0 !! compare(op, "*") == 0 then 
+                  move(x, eax) <+ Binop(op, y, eax) <+> move(eax, y)
+                elif compare(op, "/") == 0 !! compare(op, "%") == 0 then
+                  move(x, eax) <+ Cltd <+ IDiv(y) <+>  move(if compare(op, "/") == 0 then eax else edx fi, y)
+                elif compare(op, "<") == 0 !! compare(op, ">") == 0 !! compare(op, "<=") == 0 !! compare(op, ">=") == 0 !! compare(op, "==") == 0 !! compare(op, "!=") == 0 then
+                  move(x, eax) <+ Binop("^", edx, edx) <+ Binop("cmp", y, eax) <+ Set(suffix(op), "%dl") <+> move(edx, y)
+                elif compare(op, "&&") == 0 !! compare(op, "!!") == 0 then
+                  listBuffer({
+                    Binop("^", eax, eax), Binop("cmp", x, eax), Set(suffix("!="), "%al"),
+                    Binop("^", edx, edx), Binop("cmp", y, edx), Set(suffix("!="), "%dl"),
+                    Binop(op, edx, eax), Mov(eax, y)
+                   })
+                else
+                  failure("unkown binary operator %s\n", op)
+              fi
+            ;
+            [env.push(y), code <+> insns] 
         esac
+      | LD (x) -> 
+        case env.addGlobal(x).allocate of
+          [s, env] -> [env, code <+> move(env.loc(x), s)]
+        esac
+      | ST (x) -> 
+        case env.addGlobal(x).pop of
+          [s, env] -> [env, code <+> move(s, env.loc(x))]
+        esac
+      | CONST (n) -> 
+        case env.allocate of
+          [s, env] -> [env, code <+> move(L(n), s)]
+        esac
+      | LABEL (l) -> [env, code <+ Label(l)]
+      | JMP (l) -> [env, code <+ Jmp(l)]
+      | CJMP (c, l) ->
+        case env.pop of
+          [x, env] -> [env, code <+> move(x, eax) <+ Binop("&&", eax, eax) <+ CJmp(c, l)]
+        esac
+      esac
     }, [env, emptyBuffer ()], code)}
 
 -- A top-level codegeneration function. Takes a driver's environment and a stack machine program,

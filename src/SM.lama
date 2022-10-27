@@ -54,9 +54,34 @@ fun fromLabel (env, lab) {
 
 -- Stack machine interpreter. Takes an environment, an SM-configuration and a program,
 -- returns a final configuration
-fun eval (env, c, insns) {
-  failure ("SM eval not implemented\n")
-}
+fun eval(env, c @ [stack, state, world], insns)  {
+   case insns of
+     { } -> c
+     | CONST (n) : p -> eval(env, [n:stack, state, world], p)
+     | BINOP (s) : p -> case stack of
+       y : x : tl -> eval(env, [evalBinop(s)(x, y):tl, state, world], p)
+     esac
+     | READ : p -> case readWorld(world) of
+       [z, w] -> eval(env, [z:stack, state, w], p)
+     esac
+     | WRITE : p -> case stack of
+       z : tl -> eval(env, [tl, state, writeWorld(z, world)], p)
+     esac
+     | LD (x) : p -> eval(env, [state(x):stack, state, world], p)
+     | ST (x) : p -> case stack of
+       z : tl -> eval(env, [tl, state <- [x, z], world], p)
+     esac
+     | LABEL (s) : p -> eval(env, c, p)
+     | JMP   (l) : _ -> eval(env, c, env.fromLabel(l))
+     | CJMP  (c, l) : p ->
+       case [c, stack] of
+           ["z", 0 : tl] -> eval(env, [tl, state, world], env.fromLabel(l))
+         | ["z", _ : tl] -> eval(env, [tl, state, world], p)
+         | ["nz", 0 : tl] -> eval(env, [tl, state, world], p)
+         | ["nz", _ : tl] -> eval(env, [tl, state, world], env.fromLabel(l))
+       esac
+   esac
+ }
 
 -- Runs a stack machine for a given input and a given program, returns an output
 public fun evalSM (input, insns) {
@@ -95,9 +120,13 @@ fun genLabels (env, n) {
 
 -- Compiles an expression into a stack machine code.
 -- Takes an expression, returns a list of stack machine instructions
-fun compileExpr (expr) {
-  failure ("compileExpr not implemented\n")
-}
+fun compileExpr(expr) {
+   case expr of
+     Const (n) -> singletonBuffer( CONST(n) )
+     | Var (x) -> singletonBuffer( LD(x) )
+     | Binop (binop, e1, e2) -> compileExpr(e1) <+> compileExpr(e2) <+ BINOP(binop)
+   esac
+ }
 
 -- Compiles a statement into a stack machine code.
 -- Takes a statement, returns a list of stack machine
@@ -137,7 +166,47 @@ public fun compileSM (stmt) {
                   esac
              esac
         esac
-    | _              -> failure ("compileSM not implemented\n")
+    | While (e, s) ->
+      case env.genLabels(2) of
+        [condLab, bodyLab, env] ->
+          case compile(condLab, env, s) of
+            [_, env, bodyCode] -> [false, env, singletonBuffer(JMP(condLab))
+              <+ LABEL(bodyLab)
+              <+> bodyCode
+              <+ LABEL(condLab)
+              <+> compileExpr(e)
+              <+ CJMP("nz", bodyLab)
+            ]
+          esac
+      esac
+    | DoWhile (s, e) ->
+      case env.genLabels(2) of
+        [condLab, bodyLab, env] ->
+          case compile(condLab, env, s) of
+            [_, env, bodyCode] -> [false, env, singletonBuffer(LABEL(bodyLab))
+              <+> bodyCode
+              <+ LABEL(condLab)
+              <+> compileExpr(e)
+              <+ CJMP("nz", bodyLab)
+            ]
+          esac
+      esac
+    | If (e, s1, s2) ->
+      case env.genLabel of
+        [elseLab, env] ->
+          case compile(lab, env, s1) of
+            [_, env, ifTrueCode] ->
+              case compile(lab, env, s2) of
+                [_, env, elseCode] -> [true, env, compileExpr(e)
+                  <+ CJMP("z", elseLab)
+                  <+> ifTrueCode
+                  <+ JMP(lab)
+                  <+ LABEL(elseLab)
+                  <+> elseCode
+                ]
+              esac
+          esac
+      esac
     esac
   }  
 
