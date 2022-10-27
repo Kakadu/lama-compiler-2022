@@ -54,21 +54,35 @@ fun fromLabel (env, lab) {
 
 -- Stack machine interpreter. Takes an environment, an SM-configuration and a program,
 -- returns a final configuration
-fun eval ([stack, st, w], insns) {
-  case insns of
-    {}          -> [stack, st, w]
-  | ins : insns -> eval (
-    case ins of
-      LD (x)     -> [st (x) : stack, st, w]
-    | CONST (n)  -> [n : stack, st, w]
-    | BINOP (op) -> case stack of h : m : stack -> [evalBinop (op) (m, h) : stack, st, w] esac
-    | ST (x)     -> case stack of h : stack -> [stack, st <- [x, h], w] esac
-    | READ       -> case readWorld (w) of [n, w] -> [n : stack, st, w] esac
-    | WRITE      -> case stack of h : stack -> [stack, st, writeWorld (h, w)] esac
-    esac,
-    insns
-    )
-  esac
+fun eval (env, c, insns) {
+  fun eval ([stack, st, w], insns) {
+    case insns of
+      {}                       -> [stack, st, w]
+    | JMP (lab) : _            -> eval ([stack, st, w], env.fromLabel (lab))
+    | CJMP (cond, lab) : insns ->
+      case stack of
+        n : stack -> if case cond of "z" -> n == 0 | _ -> n != 0 esac
+                     then eval ([stack, st, w], env.fromLabel (lab))
+                     else eval ([stack, st, w], insns)
+                     fi 
+      esac 
+    | ins : insns              ->
+      eval (
+        case ins of
+          LD (x)     -> [st (x) : stack, st, w]
+        | CONST (n)  -> [n : stack, st, w]
+        | BINOP (op) -> case stack of h : m : stack -> [evalBinop (op) (m, h) : stack, st, w] esac
+        | ST (x)     -> case stack of h : stack -> [stack, st <- [x, h], w] esac
+        | READ       -> case readWorld (w) of [n, w] -> [n : stack, st, w] esac
+        | WRITE      -> case stack of h : stack -> [stack, st, writeWorld (h, w)] esac
+        | LABEL (_)  -> [stack, st, w]
+        esac,
+        insns
+      )
+    esac
+  }
+
+  eval (c, insns)
 }
 
 -- Runs a stack machine for a given input and a given program, returns an output
@@ -154,7 +168,51 @@ public fun compileSM (stmt) {
                   esac
              esac
         esac
-    | _              -> failure ("compileSM not implemented\n")
+    | DoWhile (body, cond) ->
+      case env.genLabels (2) of
+        [condLabel, bodyLabel, env] ->
+          case compile (condLabel, env, body) of
+            [condLabelUsed, env, bodyCode] ->
+              [false, env, singletonBuffer (LABEL (bodyLabel)) <+>
+                          bodyCode <+>
+                          label (condLabel, condLabelUsed) <+>
+                          compileExpr (cond) <+
+                          CJMP ("z", bodyLabel)
+              ]
+          esac
+      esac
+    | If (cond, th, el) -> 
+      case env.genLabel of
+       [elseLabel, env] ->
+        case compile (lab, env, th) of
+          [labUsedInThen, env, thenCode] ->
+            case compile (lab, env, el) of
+              [labUsedInElse, env, elseCode] ->
+                [true, env, compileExpr (cond) <+
+                            CJMP ("z", elseLabel) <+>
+                            thenCode <+
+                            JMP (lab) <+
+                            LABEL (elseLabel) <+>
+                            elseCode
+                ]
+            esac
+        esac
+      esac
+    | While (cond, body) ->
+      case env.genLabels (2) of
+        [bodyLabel, condLabel, env] ->
+          case compile (condLabel, env, body) of
+            [_, env, bodyCode] ->
+              [false, env, singletonBuffer (JMP (condLabel)) <+
+                           LABEL (bodyLabel) <+>
+                           bodyCode <+
+                           LABEL (condLabel) <+>
+                           compileExpr (cond) <+
+                           CJMP ("nz", bodyLabel)
+              
+              ]
+          esac
+      esac
     esac
   }  
 
