@@ -52,7 +52,28 @@ fun binop (op) {
   ]
 }
 
-var primary  = memo $ eta syntax (
+var ifp = memo $ eta syntax (
+      loc=pos kIf cond=exp kThen sTrue=exp kFi                      {fun (a) {assertVoid(a, If(cond(Val), sTrue(Void), Skip), loc)}}   |
+              kIf cond=exp kThen sTrue=exp kElse sFalse=exp kFi     {fun (a) {If(cond(Val), sTrue(a), sFalse(a))}} |
+              kIf cond=exp kThen sTrue=exp rest=elifsp              {fun (a) {If(cond(Val), sTrue(a), rest(a))}}),
+    elifsp = memo $ eta syntax (
+              kElif cond=exp kThen sTrue=exp rest=elifsp            {fun (a) {If(cond(Val), sTrue(a), rest(a))}}   |
+              kElif cond=exp kThen sTrue=exp kElse sFalse=exp kFi   {fun (a) {If(cond(Val), sTrue(a), sFalse(a))}} |
+      loc=pos kElif cond=exp kThen sTrue=exp kFi                    {fun (a) {assertVoid(a, If(cond(Val), sTrue(Void), Skip), loc)}}),
+    whilep = memo $ eta syntax (
+      loc=pos kWhile cond=exp kDo body=exp kOd                      {fun (a) {assertVoid(a, While(cond(Val), body(Void)), loc)}}),
+    dowhilep = memo $ eta syntax (
+      loc=pos kDo body=exp kWhile cond=exp kOd                      {fun (a) {assertVoid(a, DoWhile(body(Void), cond(Val)))}}),
+    forp = memo $ eta syntax (
+      loc=pos kFor init=exp s[","] cond=exp s[","] iter=exp kDo body=exp kOd
+                                                                    {fun (a) {assertVoid(a, Seq(init(Void), While(cond(Val), Seq(body(Void), iter(Void)))), loc)}}),
+    readp = memo $ eta syntax (
+      loc=pos kRead s["("] x=lident s[")"]                          {fun (a) {assertVoid(a, Read(x), loc)}}),
+    writep = memo $ eta syntax (
+      loc=pos kWrite s["("] e=exp s[")"]                            {fun (a) {assertVoid(a, Write(e(Val)), loc)}}),
+    skipp = memo $ eta syntax (
+      loc=pos kSkip                                                 {fun (a) {assertVoid(a, Skip, loc)}}),
+    primary  = memo $ eta syntax (                   
                                   -- decimal constant
                                   loc=pos x=decimal                                 {fun (a) {assertValue (a, Const (stringInt (x)), loc)}}     |
 
@@ -64,7 +85,7 @@ var primary  = memo $ eta syntax (
                                                                                        | _    -> Var (x)
                                                                                        esac
                                                                                     }} |
-                                  $(failure ("the rest of primary parsing in not implemented\n"))),
+                                  inbr[s("("), exp, s(")")] | ifp | whilep | dowhilep | forp | readp | writep | skipp),
     basic    = memo $ eta (expr ({[Right, {[s (":="),
                                             fun (l, loc, r) {
                                               fun (a) {assertValue (a, Assn (l (Ref), r (Val)), loc)}
@@ -75,7 +96,7 @@ var primary  = memo $ eta syntax (
                                   [Left , map (binop, {"+", "-"})],
                                   [Left , map (binop, {"*", "/", "%"})]
                                  },
-                                 primary)),
+                                 primary) | primary),
     exp      = memo $ eta syntax (basic | s1=basic s[";"] s2=exp {fun (a) {Seq (s1 (Void), s2 (a))}});
 
 -- Public top-level parser
