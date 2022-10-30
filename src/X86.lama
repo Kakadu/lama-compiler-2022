@@ -407,6 +407,72 @@ fun suffix (op) {
   esac
 }
 
+fun getOpType (op) {
+  case op of
+    "+"  -> General
+  | "-"  -> General
+  | "*"  -> General
+  | "&&" -> Logical
+  | "!!" -> Logical
+  | "/"  -> Division
+  | "%"  -> Division
+  | _    -> Comparison
+  esac
+}
+
+fun genGeneral (op, l, r) {
+  if memOpnd (l)
+  then singletonBuffer (Mov (l, eax)) <+ Binop (op, r, eax) <+ Mov (eax, l)
+  else singletonBuffer (Binop (op, r, l))
+  fi
+}
+
+fun genLogical (op, l, r) {
+  singletonBuffer (Mov (l, eax)) <+ Mov (L (0), edx) <+ Binop ("cmp", eax, edx) <+
+  Mov (L (0), eax) <+ Set ("ne", "%al") <+ Push (eax) <+ Mov (r, eax) <+
+  Binop ("cmp", eax, edx) <+ Mov (L (0), eax) <+ Set ("ne", "%al") <+ Pop (edx) <+
+  Binop (op, edx, eax) <+ Mov (eax, l)
+}
+
+fun genDivision (op, l, r) {
+  singletonBuffer (Mov (l, eax)) <+ Cltd <+ IDiv (r) <+
+  Mov (case op of "/" -> eax | "%" -> edx esac, l)
+}
+
+fun genComparison (op, l, r) {
+  singletonBuffer (Mov (l, eax)) <+ Mov (r, edx) <+ Binop ("cmp", edx, eax) <+
+  Mov (L (0), eax) <+ Set (suffix(op), "%al") <+ Mov (eax, l)
+}
+
+fun genBinOp (op, l, r) {
+  case getOpType (op) of
+    General    -> genGeneral (op, l, r)
+  | Logical    -> genLogical (op, l, r)
+  | Division   -> genDivision (op, l, r)
+  | Comparison -> genComparison (op, l, r)
+  esac
+}
+
+fun genCall (env, fLabel, na) {
+  var pushRegs = map (fun (r) {Push (r)}, liveRegisters (env, na));
+  var popRegs = map (fun (r) {Pop (r)}, liveRegisters (env, na));
+  var pushArgs = {};
+
+  popRegs := reverse (popRegs);
+
+  for var i; i := 0, i < na, i := i + 1 do
+    case pop (env) of [x, newEnv] ->
+      pushArgs := pushArgs +++ {Push (x)};
+      env := newEnv
+    esac
+  od;
+
+  case allocate (env) of [x, env] ->
+    [env, listBuffer (pushRegs) <+> listBuffer (pushArgs) <+ Call (fLabel) <+
+          Binop ("+", L (wordSize * na), esp) <+> listBuffer (popRegs) <+ Mov (eax, x)]
+  esac
+}
+
 -- Compiles stack machine code into a list of x86 instructions. Takes an environment
 -- and stack machine code, returns an updated environment and x86 code.
 fun compile (env, code) {
@@ -440,7 +506,59 @@ fun compile (env, code) {
          -- 1. generate proper prologue for BEGIN instruction (use "prologue" helper); use
          --    env.enterFunction to create a proper environment;
          -- 2. generate epilogue for END instruction.
-               
+        | CONST (n) ->
+          case allocate (env) of
+            [s, env] -> [env, code <+> move (L (n), s)]
+          esac
+        | LD (x) ->
+            case allocate (env) of
+              [s, env] -> [env, code <+> move (loc (env, x), s)]
+            esac
+        | ST (x) ->
+            [env, code <+> move (peek (env), loc (env, x))]
+        | BINOP (op) ->
+            case pop2 (env) of
+              [r, l, env] -> [push(env, l), code <+> genBinOp(op, l, r)]
+            esac
+        | LABEL (l) ->
+          if isBarrier (env)
+          then env := retrieveStack (env, l)
+          fi;
+
+          [env, code <+ Label (l)]
+        | JMP (l) ->
+          case setBarrier (setStack (env, l)) of
+            env -> [env, code <+ Jmp (l)]
+          esac
+        | CJMP (c, l) ->
+          case pop (env) of
+            [s, env] -> [setStack (env, l), code <+ Mov (L (0), eax) <+ Binop ("cmp", eax, s) <+
+                         CJmp (c, l)]
+          esac
+        | LDA (x) ->
+            case allocate (env) of
+              [s, env] -> [env, code <+ Lea (loc (env, x), eax) <+ Mov (eax, s)]
+            esac
+        | STI ->
+            case pop2 (env) of
+              [v, x, env] -> [push (env, x), code <+ Mov (v, I (0, x)) <+ Mov (v, x)]
+            esac
+        | DROP ->
+            case pop (env) of
+              [_, env] -> [env, code]
+            esac
+        | BEGIN (fLabel, na, nl) ->
+            [enterFunction(env, fLabel, nl), code <+> prologue (fLabel)]
+        | END ->
+            case epilogue (env) of [env, eCode] ->
+              [env, code <+> eCode]
+            esac
+        | CALL (fLabel, na) ->
+            case genCall (env, fLabel, na) of [env, callCode] ->
+              [env, code <+> callCode]
+            esac
+        | GLOBAL (g) ->
+            [addGlobal (env, g), code]
         | _ -> failure ("codegeneration for instruction %s is not yet implemented\n", i.string)
         (* End *)
         esac
