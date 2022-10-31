@@ -448,10 +448,14 @@ fun compile (env, code) {
               [s, env] -> [env, code <+ Push (s) <+ Call ("Lwrite") <+ Pop (eax)]
             esac
         | LD (x) ->
-          case env.addGlobal (x).allocate of
-            [s, env] -> [env, code <+> move (env.loc (x), s)]
-          esac
-        | ST (x) ->
+            case env.addGlobal (x).allocate of
+              [s, env] -> [env, code <+> move (env.loc (x), s)]
+            esac
+        | LDA (x) ->
+            case env.addGlobal (x).allocate of
+              [s, env] -> [env, code <+ Lea (env.loc (x), eax) <+> move (eax, s)]
+            esac
+        | ST (x)      ->
             case env.addGlobal (x).pop of
               [s, env] -> [env, code <+> move (s, env.loc (x))]
             esac
@@ -464,13 +468,29 @@ fun compile (env, code) {
               [x, y, env] -> [env.push (y), code <+> compileBinop (op, x, y)]
             esac
         | LABEL (l) ->
-            [env, code <+ Label (l)]
+            if isBarrier (env)
+            then [retrieveStack (env, l), code <+ Label (l)] 
+            else [env, code <+ Label (l)]
+            fi
         | JMP (l) ->
-            [env, code <+ Jmp (l)]
+            [setBarrier (setStack (env, l)), code <+ Jmp (l)]
         | CJMP (s, l) ->
           case env.pop of
-            [x, env] -> [env, code <+ Binop("cmp", L (0), x) <+ CJmp (s, l)]
+            [x, env] -> [setStack (env, l), code <+ Binop("cmp", L (0), x) <+ CJmp (s, l)]
           esac
+        | STI  -> case env.pop2 of
+                    [v, x, env] ->
+                      [env.push (x), code <+> if memOpnd (x)
+                                               then singletonBuffer (Mov (v, edx)) <+
+                                                    Mov (x, eax) <+
+                                                    Mov (edx, I (0, eax)) <+
+                                                    Mov (edx, x)
+                                               else singletonBuffer (Mov (v, eax)) <+
+                                                    Mov (eax, I (0, x)) <+ Mov (eax, x)
+                                               fi
+                      ]
+                  esac
+        | DROP -> case env.pop of [_, env] -> [env, code] esac
         | _ -> failure ("codegeneration for instruction %s is not yet implemented\n", i.string)
         esac
       }, [env, emptyBuffer ()], code)
