@@ -65,61 +65,60 @@ fun evalList (c, exprs) {
 
 fun eval (c@[s, w], expr) {
   case expr of
-    Const (n)        -> [c, Value (n)]
-    Var (x)          -> [c, Value (s(x))] -- FIXME for undefined "x"s returns Some (0)
-    Ref (x)          -> [c, Ref (x)]
-    Ignore (_)       -> [c, None]
-    Binop (op, l, r) -> (
+      Const (n)        -> [c, Value (n)]
+    | Var (x)          -> [c, Value (s(x))] -- FIXME for undefined "x"s returns Some (0)
+    | Ref (x)          -> [c, Ref (x)]
+    | Ignore (_)       -> [c, None]
+    | Binop (op, l, r) -> (
         case eval (c, l) of
             [c, Value (lvalue)] -> case eval (c, r) of
                 [c, Value (rvalue)] -> [c, Value (evalOp (op, lvalue, rvalue))]
-                _ -> failure ("Should not reach")
+                | _ -> failure ("Should not reach")
             esac
-            _ -> failure ("Should not reach")
+            | _ -> failure ("Should not reach")
         esac
     )
-    Skip             -> [c, None]
-    Assn (l, r)      -> (
+    | Skip             -> [c, None]
+    | Assn (l, r)      -> (
         case eval (c, l) of
             [c, Ref (x)] -> case eval (c, r) of
                 [[s, w], Value (v)] -> [[s <- [x, v], w], Value (v)]
-                _ -> failure ("Should not reach")
+                | _ -> failure ("Should not reach")
             esac
-            _ -> failure ("Should not reach")
+            | _ -> failure ("Should not reach")
         esac
     )
-    Read (x)         -> (
+    | Read (x)         -> (
         case readWorld(w) of
             [v, newWorld] -> [[s <- [x, v], newWorld], None]
         esac
     )
-    Write (e)        -> (
+    | Write (e)        -> (
         case eval (c, e) of
             [[s, w], Value (v)] -> [[s, writeWorld (v, w)], None]
-            _ -> failure ("Should not reach")
+            | _ -> failure ("Should not reach")
         esac
     )
-    Seq (e1, e2)     -> (
+    | Seq (e1, e2)     -> (
         case eval (c, e1) of
             [c, _] -> eval (c, e2)
         esac
     )
-    If (cond, thenB, elseB) -> (
+    | If (cond, thenB, elseB) -> (
         case eval (c, cond) of
-            [c, Value (v)] -> if v then eval (c, thenB) else eval (c, elseB)
-            _ -> failure ("Should not reach")
+            [c, Value (v)] -> if v then eval (c, thenB) else eval (c, elseB) fi
+            | _ -> failure ("Should not reach")
         esac
     )
-    While (cond, body)      -> (
+    | While (cond, body)      -> (
         case eval (c, cond) of
-            [c, Value (v)] -> if v then eval (c, expr) else [c, None]
-            _ -> failure ("Should not reach")
+            [c, Value (v)] -> if v then eval (c, expr) else [c, None] fi
+            | _ -> failure ("Should not reach")
         esac
     )
-    DoWhile (body, cond)    -> (
+    | DoWhile (body, cond)    -> (
         case eval (c, body) of
             [c, _] -> eval (c, While (cond, body))
-            esac
         esac
     )
   esac

@@ -76,7 +76,7 @@ fun eval (env, c, insns) {
         var packedValue = stack.hd, stackTail = stack.tl;
         case packedValue of
             Value (value) -> [stackTail, st, writeWorld(value, w)]
-            _ -> failure ("Should not reach")
+            | _ -> failure ("Should not reach")
         esac
       )
     | BINOP (binop) -> (
@@ -85,12 +85,12 @@ fun eval (env, c, insns) {
         case packedLarg of
             Value (larg) -> case packedRarg of
                 Value (rarg) -> (
-                    var value = evalBinop (binop) (larg, rarg);
+                    var value = evalOp (binop, larg, rarg);
                     [Value (value) : stackTail, st, w]
                 )
-                _ -> failure ("Should not reach")
+                | _ -> failure ("Should not reach")
             esac
-            _ -> failure ("Should not reach")
+            | _ -> failure ("Should not reach")
         esac
       )
     | LD    (x) -> [Value (st (x)) : stack, st, w] -- FIXME for undefined "x"s returns Some (0)
@@ -99,7 +99,7 @@ fun eval (env, c, insns) {
         var packedValue = stack.hd;
         case packedValue of
             Value (value) -> [stack, st <- [x, value], w]
-            _ -> failure ("Should not reach")
+            | _ -> failure ("Should not reach")
         esac
     )
     | STI       -> (
@@ -110,9 +110,9 @@ fun eval (env, c, insns) {
                  Value (v) -> (
                      [Value (v) : stackTail, st <- [x, v], w]
                  )
-                 _ -> failure ("Should not reach")
+                 | _ -> failure ("Should not reach")
             esac
-            _ -> failure ("Should not reach")
+            | _ -> failure ("Should not reach")
         esac
     )
     | CONST (n) -> [Value (n) : stack, st, w]
@@ -253,7 +253,7 @@ public fun compileSM (stmt) {
     | Seq   (e1, e2) -> (
         case env.genLabel of
           [e2Lab, env] ->
-             case compile (s2Lab, env, e1) of
+             case compile (e2Lab, env, e1) of
                [e2LabUsed, env, e1Code] ->
                   case compile (lab, env, e2) of
                     [labUsed, env, e2Code] -> [labUsed, env, e1Code <+> label (e2Lab, e2LabUsed) <+> e2Code]
