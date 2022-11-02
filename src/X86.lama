@@ -74,6 +74,8 @@ fun insnString (insn) {
     | S (i) -> sprintf ("-%d(%%ebp)", (i+1) * wordSize)
     | M (x) -> x
     | L (i) -> sprintf ("$%d", i)
+    | I (0, x) -> sprintf ("(%s)", opndString (x))
+    | I (n, x) -> sprintf ("%d(%s)", n, opndString (x))
     esac
   }
   
@@ -82,11 +84,15 @@ fun insnString (insn) {
   | Set   (suf, s)     -> sprintf ("\tset%s\t%s\n", suf, s)
   | IDiv  (s1)         -> sprintf ("\tidivl\t%s\n", opndString (s1))
   | Binop (op, s1, s2) -> sprintf ("\t%s\t%s,\t%s\n", binopString (op), opndString (s1), opndString (s2))
+  | Lea   (s1, s2)     -> sprintf ("\tleal\t%s,\t%s\n", opndString (s1), opndString (s2))
   | Mov   (s1, s2)     -> sprintf ("\tmovl\t%s,\t%s\n", opndString (s1), opndString (s2))
   | Push  (s)          -> sprintf ("\tpushl\t%s\n", opndString (s))
   | Pop   (s)          -> sprintf ("\tpopl\t%s\n", opndString (s))
   | Ret                -> "\tret\n"
   | Call  (p)          -> sprintf ("\tcall\t%s\n", p)
+  | Label (l)          -> sprintf ("%s:\n", l)
+  | Jmp   (l)          -> sprintf ("\tjmp\t%s\n", l)
+  | CJmp  (c, l)       -> sprintf ("\tj%s\t%s\n", c, l)
   | Meta  (m)          -> m
   esac
 }
@@ -354,6 +360,10 @@ fun compile (env, code) {
           case env.pop of
             [s, env] -> [env, code <+ Push (s) <+ Call ("Lwrite") <+ Pop (eax)]
           esac
+      | DROP   ->
+        case env.pop of
+            [_, env] -> [env, code]
+        esac
       | ST (x) ->
           case env.pop of
             [s, env] -> (
@@ -361,9 +371,17 @@ fun compile (env, code) {
                 [newEnv, code <+ Mov (s, newEnv.loc(x))]
             )
           esac
+      | STI    ->
+          case env.pop2 of
+            [v, a, env] -> [env.push(v), code <+> move(v, I(0, a))]
+          esac
       | LD (x) ->
           case env.allocate of
             [s, env] -> [env, code <+ Mov (env.loc(x), s)]
+          esac
+      | LDA (x)   ->
+          case env.allocate of
+            [s, env] -> [env, code <+> if memOpnd(s) then singletonBuffer(Lea (env.loc(x), eax) <+ Mov (eax, s) else singletonBuffer(Lea (env.loc(x), s)) fi]
           esac
       | CONST (n) ->
           case env.allocate of
