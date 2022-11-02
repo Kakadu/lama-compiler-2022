@@ -82,7 +82,7 @@ fun eval (c@[s, w], expr) {
     Assn (l, r)      -> (
         case eval (c, l) of
             [c, Ref (x)] -> case eval (c, r) of
-                [[s, w], Value (v)] -> [[s <- (x, v), w], Value (v)]
+                [[s, w], Value (v)] -> [[s <- [x, v], w], Value (v)]
                 _ -> failure ("Should not reach")
             esac
             _ -> failure ("Should not reach")
@@ -90,7 +90,7 @@ fun eval (c@[s, w], expr) {
     )
     Read (x)         -> (
         case readWorld(w) of
-            [v, newWorld] -> [[s <- (x, v), newWorld], None]
+            [v, newWorld] -> [[s <- [x, v], newWorld], None]
         esac
     )
     Write (e)        -> (
