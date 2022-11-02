@@ -129,7 +129,7 @@ fun eval (env, c, insns) {
         | CJMP (cond, lab) -> (
            var stack = c[0], st = c[1], w = c[2];
            case stack of
-              x : stack -> eval (env, [stack, st, w], if (case cond of "nz" -> x | "z" -> x == 0 esac) then env.fromLabel (lab) else insns fi)
+              Value (x) : stack -> eval (env, [stack, st, w], if (case cond of "nz" -> x | "z" -> x == 0 esac) then env.fromLabel (lab) else insns fi)
            esac
         )
         | _ -> eval (env, evalInstruction(c, ins), insns)
@@ -233,7 +233,7 @@ public fun compileSM (stmt) {
             esac
         esac
     )
-    | Read  (x)      -> [false, env, singletonBuffer (READ) <+ ST (x)]
+    | Read  (x)      -> [false, env, singletonBuffer (READ) <+ ST (x) <+ DROP]
     | Write (e)      -> (
         case env.genLabel of
             [lab, env] -> case compile (lab, env, e) of

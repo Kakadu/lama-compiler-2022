@@ -71,6 +71,7 @@ var primary  = memo $ eta syntax (
                                   | loc=pos kWhile cond=exp kDo body=exp kOd { fun(a) { assertVoid (a, While (cond (Val), body (Void)), loc) } }
                                   | loc=pos kDo body=exp kWhile cond=exp kOd { fun(a) { assertVoid (a, DoWhile (body (Void), cond (Val)), loc) } }
                                   | loc=pos kFor s1=exp s[","] cond=exp s[","] s2=exp kDo s3=exp kOd { fun(a) { assertVoid(a, Seq (s1 (Void), While (cond (Val), Seq (s3 (Void), s2 (Void)))), loc) } }
+                                  | inbr[s("("), exp, s(")")]
                                   ),
     basic    = memo $ eta (expr ({[Right, {[s (":="),
                                             fun (l, loc, r) {
@@ -84,7 +85,7 @@ var primary  = memo $ eta syntax (
                                  },
                                  primary)),
     exp      = memo $ eta syntax (basic | s1=basic s[";"] s2=exp {fun (a) {Seq (s1 (Void), s2 (a))}}),
-    elseTail = memo $ eta syntax ( kFi { fun(a) { assertVoid (a, Skip, loc) } } | -kElse exp -kFi | kElif cond=exp kThen s1=exp s2=exp { fun(a) { If (cond (Val), s1 (a), s2 (a)) } } );
+    elseTail = memo $ eta syntax ( loc=pos kFi { fun(a) { assertVoid (a, Skip, loc) } } | -kElse exp -kFi | kElif cond=exp kThen s1=exp s2=elseTail { fun(a) { If (cond (Val), s1 (a), s2 (a)) } } );
 
 
 -- Public top-level parser

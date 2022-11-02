@@ -68,7 +68,7 @@ fun eval (c@[s, w], expr) {
       Const (n)        -> [c, Value (n)]
     | Var (x)          -> [c, Value (s(x))] -- FIXME for undefined "x"s returns Some (0)
     | Ref (x)          -> [c, Ref (x)]
-    | Ignore (_)       -> [c, None]
+    | Ignore (e)    -> case eval (c, e) of [c, _] -> [c, None] esac
     | Binop (op, l, r) -> (
         case eval (c, l) of
             [c, Value (lvalue)] -> case eval (c, r) of
@@ -112,7 +112,11 @@ fun eval (c@[s, w], expr) {
     )
     | While (cond, body)      -> (
         case eval (c, cond) of
-            [c, Value (v)] -> if v then eval (c, expr) else [c, None] fi
+            [c, Value (v)] ->
+                if v then case eval (c, body) of [c, _] ->
+                     eval (c, expr)
+                esac
+                else [c, None] fi
             | _ -> failure ("Should not reach")
         esac
     )

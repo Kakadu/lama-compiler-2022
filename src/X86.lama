@@ -321,6 +321,7 @@ fun memOpnd (opnd) {
   case opnd of
     S (_) -> true
   | M (_) -> true
+  | I (_, _) -> true
   | _     -> false
   esac
 }
@@ -366,25 +367,25 @@ fun compile (env, code) {
         case env.pop of
             [_, env] -> [env, code]
         esac
-      | ST (x) ->
-          case env.pop of
-            [s, env] -> (
-                var newEnv = env.addGlobal(x);
-                [newEnv, code <+ Mov (s, newEnv.loc(x))]
-            )
-          esac
+      | ST (x) -> [env.addGlobal(x), code <+> move(env.peek, env.loc(x))]
       | STI    ->
           case env.pop2 of
             [v, a, env] -> [env.push(v), code <+> move(v, I(0, a))]
           esac
       | LD (x) ->
-          case env.allocate of
-            [s, env] -> [env, code <+ Mov (env.loc(x), s)]
+          case env.addGlobal(x).allocate of
+            [s, env] -> [env, code <+> move (env.loc(x), s)]
           esac
       | LDA (x)   ->
-          case env.allocate of
-            [s, env] -> [env, code <+> if memOpnd(s) then singletonBuffer(Lea (env.loc(x), eax)) <+ Mov (eax, s) else singletonBuffer(Lea (env.loc(x), s)) fi]
+          case env.addGlobal(x).allocate of
+            [s, env] -> [env, code <+ if memOpnd(s) then Lea(env.loc(x), eax) <+ Mov(eax, s) else Lea(env.loc(x), s) fi]
           esac
+      | LABEL (lab) -> [if env.isBarrier then env.retrieveStack(lab).setBarrier else env fi, code <+ Label (lab)]
+      | JMP (lab) -> [env.setBarrier, code <+ Jmp (lab)]
+      | CJMP (suffix, lab) ->
+        case env.pop of
+            [s, env] -> [env.setStack(lab), code <+> if memOpnd (s) then move (s, eax) <+ Binop ("&&", eax, eax) else singletonBuffer (Binop ("&&", s, s)) fi <+ CJmp (suffix, lab)]
+        esac
       | CONST (n) ->
           case env.allocate of
             [s, env] -> [env, code <+ Mov (L(n), s)]
@@ -410,9 +411,10 @@ fun compile (env, code) {
                          else singletonBuffer(Binop ("cmp", y, x))
                          fi <+ Set (suffix(binop), "%al") <+ Mov (eax, x)
                     elif compare(binop, "!!") == 0 !! compare(binop, "&&") == 0 then
-                         singletonBuffer(Mov (x, eax)) <+ Binop ("cmp", L(0), eax) <+ Binop ("^", eax, eax) <+ Set ("ne", "%al") <+
-                         Mov (y, edx) <+ Binop ("cmp", L(0), edx) <+ Binop ("^", edx, edx) <+ Set ("ne", "%dl") <+
-                         Binop (binop, edx, eax) <+ Mov (eax, x)
+                         emptyBuffer() <+
+                         Mov(x, eax) <+ Binop("&&", eax, eax) <+ Mov(L(0), eax) <+ Set(suffix("!="), "%al") <+
+                         Mov(y, edx) <+ Binop("&&", edx, edx) <+ Mov(L(0), edx) <+ Set(suffix("!="), "%dl") <+
+                         Binop(binop, edx, eax) <+ Mov(eax, x)
                     else failure ("codegeneration for instruction %s is not yet implemented\n", binop)
                     fi
                 ]
