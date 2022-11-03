@@ -52,31 +52,50 @@ fun binop (op) {
   ]
 }
 
-var primary  = memo $ eta syntax (
-                                  -- decimal constant
-                                  loc=pos x=decimal                                 {fun (a) {assertValue (a, Const (stringInt (x)), loc)}}     |
+fun brackets(e) {
+  syntax (inbr[s("("), e, s(")")])
+}
 
-                                  -- identifier
-                                  x=lident                                          {fun (a) {
-                                                                                       case a of
-                                                                                         Ref  -> Ref (x)
-                                                                                       | Void -> Ignore (Var (x))
-                                                                                       | _    -> Var (x)
-                                                                                       esac
-                                                                                    }} |
-                                  $(failure ("the rest of primary parsing in not implemented\n"))),
-    basic    = memo $ eta (expr ({[Right, {[s (":="),
-                                            fun (l, loc, r) {
-                                              fun (a) {assertValue (a, Assn (l (Ref), r (Val)), loc)}
-                                            }]}],
-                                  [Left , map (binop, {"!!"})],
-                                  [Left , map (binop, {"&&"})],
-                                  [Nona , map (binop, {"==", "!=", "<", ">", "<=", ">="})],
-                                  [Left , map (binop, {"+", "-"})],
-                                  [Left , map (binop, {"*", "/", "%"})]
-                                 },
-                                 primary)),
-    exp      = memo $ eta syntax (basic | s1=basic s[";"] s2=exp {fun (a) {Seq (s1 (Void), s2 (a))}});
+var if_tail = memo $ eta syntax (
+  kElif e=exp kThen s1=exp s2=if_tail { fun (a) { If(e(Val), s1(a), s2(a)) } } |
+  inbr[kElse, exp, kFi]                                                        |
+  loc=pos kFi { fun (a) { assertVoid(a, Skip, loc) } }
+),
+    primary = memo $ eta syntax (
+    loc=pos x=decimal { fun (a) { assertValue(a, Const(stringInt(x)), loc) } }                      |
+    x=lident { fun (a) { case a of
+      Ref    -> Ref(x)
+      | Void -> Ignore(Var(x))
+      | _    -> Var(x)
+    esac } }                                                                                        |
+    loc=pos kSkip { fun (a) { assertVoid(a, Skip, loc) } }                                          |
+    loc=pos kRead x=brackets[lident] { fun (a) { assertVoid(a, Read(x), loc) } }                    |
+    loc=pos kWrite e=brackets[exp] { fun (a) { assertVoid(a, Write(e(Val)), loc) } }                |
+    kIf e=exp kThen s1=exp s2=if_tail { fun (a) { If(e(Val), s1(a), s2(a)) } }                      |
+    loc=pos kWhile e=exp kDo s=exp kOd { fun (a) { assertVoid(a, While(e(Val), s(Void)), loc) } }   |
+    loc=pos kDo s=exp kWhile e=exp kOd { fun (a) { assertVoid(a, DoWhile(s(Void), e(Val)), loc) } } |
+    loc=pos kFor s1=exp s[","] e=exp s[","] s2=exp kDo s3=exp kOd { fun (a) {
+      assertVoid(a, Seq(s1(Void), While(e(Val), Seq(s3(Void), s2(Void)))), loc) }
+    }                                                                                               |
+    brackets[exp]
+  ),
+    op_or_primary = memo $ eta (
+    expr(
+      {
+        [Right, { [s(":="), fun (l, loc, r) { fun (a) { assertValue(a, Assn(l(Ref), r(Val)), loc) } }] }],
+        [Left, map(binop, { "!!" })],
+        [Left, map(binop, { "&&" })],
+        [Nona, map(binop, { "==", "!=", "<", ">", "<=", ">=" })],
+        [Left, map(binop, { "+", "-" })],
+        [Left, map(binop, { "*", "/", "%" })]
+      },
+      primary
+    )
+  ),
+    exp = memo $ eta syntax (
+    op_or_primary |
+    s1=op_or_primary s[";"] s2=exp { fun (a) { Seq(s1(Void), s2(a)) } }
+  );
 
 -- Public top-level parser
-public parse = syntax (s=exp {s (Void)});
+public parse = syntax (s=exp { s(Void) });

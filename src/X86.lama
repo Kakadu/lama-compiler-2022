@@ -394,32 +394,33 @@ fun compile(env, code) {
           case env.addGlobal(x).allocate of
             [s, env] -> [env, code <+> move(env.loc(x), s)]
           esac
+        | LDA (x)      ->
+          case env.addGlobal(x).allocate of
+            [s, env] -> [env, code <+ Lea(env.loc(x), eax) <+> move(eax, s)]
+          esac
         | ST(x)        ->
-          case env.addGlobal(x).pop of
-            [s, env] -> [env, code <+> move(s, env.loc(x))]
+          case env.addGlobal(x) of
+            env -> [env, code <+> move(env.peek, env.loc(x))]
+          esac
+        | STI          ->
+          case env.pop2 of
+            [z, a, env] -> [env.push(z), code <+> move(z, I(0, a))]
           esac
         | CONST(n)     ->
           case env.allocate of
             [s, env] -> [env, code <+> move(L(n), s)]
           esac
-        | LABEL (l)   -> [env, code <+ Label(l)]
-        | CJMP (c, l) ->
+        | LABEL (l)    -> [if env.isBarrier then env.retrieveStack(l) else env fi, code <+ Label(l)]
+        | CJMP (c, l)  ->
           case env.pop of
-            [s, env] -> [
-              env,
-              code
-                <+ Binop("cmp", L(0), s)
-                <+ CJmp(case c of
-                0 -> "z"
-              esac, l)
-            ]
+            [x, env] -> [env.setStack(l), code <+> move(x, eax) <+ Binop("&&", eax, eax) <+ CJmp(c, l)]
           esac
-        | JMP (l)     -> [
-          env,
-          code
-            <+ Jmp(l)
-        ]
-        | _           -> failure("codegeneration for instruction %s is not yet implemented\n", i.string)
+        | JMP (l)      -> [env.setBarrier, code <+ Jmp(l)]
+        | DROP         ->
+          case env.pop of
+            [x, env] -> [env, code]
+          esac
+        | _            -> failure("codegeneration for instruction %s is not yet implemented\n", i.string)
       esac
     }, [env, emptyBuffer()], code)
 }
