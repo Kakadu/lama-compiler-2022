@@ -8,16 +8,16 @@ import Parser;
 
 -- As association map which maps "\otimes" into "\oplus"
 var ops = {
-  ["+" , infix + ],
-  ["-" , infix - ],
-  ["*" , infix * ],
-  ["/" , infix / ],
-  ["%" , infix % ],
+  ["+", infix +],
+  ["-", infix -],
+  ["*", infix *],
+  ["/", infix /],
+  ["%", infix %],
   ["==", infix ==],
   ["!=", infix !=],
-  ["<" , infix < ],
+  ["<", infix <],
   ["<=", infix <=],
-  [">" , infix > ],
+  [">", infix >],
   [">=", infix >=],
   ["&&", infix &&],
   ["!!", infix !!]
@@ -27,7 +27,7 @@ var ops = {
 -- and two operand values, and returns the result
 public fun evalOp (op, l, r) {
   case assoc (ops, op) of
-    Some (f) -> f (l, r)
+  Some (f) -> f (l, r)
   esac
 }
 
@@ -79,30 +79,94 @@ fun addNames (state, names) {
 fun addFunction (state, name, args, body) {
   state.addName (name, Fun (args, body))
 }
-                                        
+
 -- Evaluates a list of expressions, properly threading a configurations.
 -- Returns the final configuration and the list of values
 fun evalList (c, exprs) {
   case foldl (fun ([c, vals], e) {
-                case eval (c, e) of
-                  [c, v] -> [c, v : vals]
-                esac
-              },
-              [c, {}],
-              exprs) of
-    [c, vals] -> [c, reverse (vals)]
+    case eval (c, e) of
+    [c, v] -> [c, v : vals]
+    esac
+  },
+    [c, {}],
+    exprs) of
+  [c, vals] -> [c, reverse (vals)]
   esac
 }
 
-(* Assignment *)
 fun eval (c@[s, w], expr) {
-  failure ("evalExpr not implemented\n")
+  case expr of
+    Assn (l, r)      ->
+      case evalList (c, {l, r}) of
+      [[s, w], {Ref (x), v}] ->
+        s.checkVar (x);
+        [[s <- [x, Var (v)], w], v]
+      esac
+  | Seq (s1, s2)     ->
+    case evalList (c, {s1, s2}) of
+    [c, {_, v}] -> [c, v]
+    esac
+  | Skip             -> [c, 0]
+  | Read (x)         ->
+    s.checkVar (x);
+    case readWorld (w) of
+    [v, w] -> [[s <- [x, Var (v)], w], 0]
+    esac
+  | Write (e)        ->
+    case eval (c, e) of
+    [[s, w], v] -> [[s, writeWorld (v, w)], 0]
+    esac
+  | If (e, s1, s2)   ->
+    case eval (c, e) of
+    [c, cond] -> eval (c, if cond then s1 else s2 fi)
+    esac
+  | While (e, s)     ->
+    case eval (c, e)of
+    [c, cond] -> if cond then case eval (c, s) of [c, 0] -> eval (c, expr) esac else [c, 0] fi
+    esac
+  | DoWhile (s, e)   ->
+    case eval (c, s) of
+    [c, 0] -> eval (c, While (e, s))
+    esac
+  | Var (x)          -> s.checkVar (x); [c, case s.lookup (x) of Var(v) -> v esac]
+  | Ref (x)          -> s.checkVar (x); [c, Ref (x)]
+  | Const (n)        -> [c, n]
+  | Binop (op, l, r) ->
+    case evalList (c, {l, r}) of
+    [c, {l, r}] -> [c, evalOp (op, l, r)]
+    esac
+  | Ignore (e)       ->
+    case eval (c, e) of
+    [c, _] -> [c, 0]
+    esac
+  | Scope (defs, e)  ->
+    case eval ([foldl (fun (s, def) {case def of
+      Var (names)              -> s.addNames (names)
+    | Fun (name, params, body) -> s.addFunction (name, params, body)
+    esac
+    }, s.enterScope, defs), w], e) of
+    [[s, w], v] -> [[s.leaveScope, w], v]
+    esac
+  | Call (f, args)   ->
+    s.checkFun (f);
+    case s.lookup (f) of
+    Fun (params, body) ->
+      if args.size != params.size then
+        error (sprintf ("expected %d arguments for function ""%s"", but found %d", params.size, f, args.size), getLoc (f))
+      fi;
+      case evalList (c, args) of
+      [[s, w], args] ->
+        case eval ([foldl (fun (s, [param, arg]) {s.addName (param, Var (arg))}, s.enterFunction, zip (params, args)), w], body) of
+        [[s2, w], v] -> [[s.leaveFunction (s2.getGlobal), w], v]
+        esac
+      esac
+    esac
+  esac
 }
-(* End *)
 
 -- Evaluates a program with a given input and returns an output
 public fun evalExpr (input, expr) {
   case eval ([emptyState (), createWorld (input)], expr) of
-    [c, _] -> c.snd.getOutput
+  [c, _] -> c.snd.getOutput
   esac
 }
