@@ -6,16 +6,16 @@ import World;
 
 -- As association map which maps "\otimes" into "\oplus"
 var ops = {
-  ["+" , infix + ],
-  ["-" , infix - ],
-  ["*" , infix * ],
-  ["/" , infix / ],
-  ["%" , infix % ],
+  ["+", infix +],
+  ["-", infix -],
+  ["*", infix *],
+  ["/", infix /],
+  ["%", infix %],
   ["==", infix ==],
   ["!=", infix !=],
-  ["<" , infix < ],
+  ["<", infix <],
   ["<=", infix <=],
-  [">" , infix > ],
+  [">", infix >],
   [">=", infix >=],
   ["&&", infix &&],
   ["!!", infix !!]
@@ -25,7 +25,7 @@ var ops = {
 -- and two operand values, and returns the result
 public fun evalOp (op, l, r) {
   case assoc (ops, op) of
-    Some (f) -> f (l, r)
+  Some (f) -> f (l, r)
   esac
 }
 
@@ -53,24 +53,63 @@ public fun evalOp (op, l, r) {
 -- Returns the final configuration and the list of values
 fun evalList (c, exprs) {
   case foldl (fun ([c, vals], e) {
-                case eval (c, e) of
-                  [c, v] -> [c, v : vals]
-                esac
-              },
-              [c, {}],
-              exprs) of
-    [c, vals] -> [c, reverse (vals)]
+    case eval (c, e) of
+    [c, v] -> [c, v : vals]
+    esac
+  },
+    [c, {}],
+    exprs) of
+  [c, vals] -> [c, reverse (vals)]
   esac
 }
 
-fun eval (c@[s, w], expr) {
-  failure ("evalExpr not implemented\n")
+fun eval (c@[state, world], expr) {
+  case expr of
+    Assn (l, r)      -> case evalList (c, {l, r}) of
+    [[s, w], {LValue (x), z}] -> [[s <- [x, z], w], z]
+    esac
+  | Seq (e1, e2)     -> case evalList (c, {e1, e2}) of
+  [c, {None, z}] -> [c, z]
+  esac
+  | If (e1, e2, e3)  -> case eval (c, e1) of
+    [c, 0] -> eval (c, e3)
+  | [c, _] -> eval (c, e2)
+  esac
+  | DoWhile (e1, e2) -> case eval (c, e1) of
+  [c, None] -> case eval (c, e2) of
+    [c, 0] -> [c, None]
+  | [c, _] -> eval (c, expr)
+  esac
+  esac
+  | While (e1, e2)   -> case eval (c, e1) of
+    [c, 0] -> [c, None]
+  | [c, _] -> case eval (c, e2) of
+  [c, None] -> eval (c, expr)
+  esac
+  esac
+  | Read (x)         -> case readWorld (world) of
+  [z, w] -> [[state <- [x, z], w], None]
+  esac
+  | Write (e)        -> case
+    eval (c, e) of [[s, w], z] -> [[s, writeWorld (z, w)], None]
+  esac
+  | Var (x)          -> [c, state (x)]
+  | Ref (x)          -> [c, LValue (x)]
+  | Const (n)        -> [c, n]
+  | Binop (op, l, r) -> case evalList (c, {l, r}) of
+  [c, {l, r}] -> [c, evalOp (op, l, r)]
+  esac
+  | Ignore (e)       -> case eval (c, e) of
+  [c, _] -> [c, None]
+  esac
+  | Skip             -> [c, None]
+  esac
 }
 
 
 -- Evaluates a program with a given input and returns an output
 public fun evalExpr (input, expr) {
   case eval ([emptyState, createWorld (input)], expr) of
-    [c, _] -> c.snd.getOutput
+  [c, _] -> c.snd.getOutput
   esac
 }
