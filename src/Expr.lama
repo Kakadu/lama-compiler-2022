@@ -63,10 +63,71 @@ fun evalList (c, exprs) {
   esac
 }
 
-fun eval (c@[s, w], expr) {
-  failure ("evalExpr not implemented\n")
-}
+-- fun eval (c@[s, w], expr) {
+--   case expr of
+--     Assn    (l, r)           -> case evalList(c, {l, r}) of 
+--                                   [[s1, w1], {Ref (name), Val (v)}] -> [[s1 <- [name, v], w1], Val (v)]
+--                                 esac
+--   | Seq     (fst, snd)       -> case evalList(c, {fst, snd}) of [c1, {_, v}] -> [c1, v] esac
+--   | Skip                     -> [c, Void]
+--   | Read    (name)           -> case readWorld (w) of [v, w1] -> [[s <- [name, v], w1], Void] esac
+--   | Write   (exp)            -> case eval (c, exp) of [[s1, w1], Val (v)] -> [[s1, writeWorld (v, w1)], Void] esac
+--   | If      (cond, fst, snd) -> case eval (c, cond) of 
+--                                   [c1, Val (condVal)] -> if condVal then eval (c1, fst) else eval (c1, snd) fi 
+--                                 esac
+--   | While   (cond, body)     -> case eval (c, cond) of [c1, Val (condVal)] ->
+--                                   if condVal then eval (eval (c1, body).fst, While (cond, body)) else [c1, Void] fi
+--                                 esac
+--   | DoWhile (body, cond)     -> case eval (c, body) of [c1, _] -> eval (c1, While (cond, body)) esac
+--   | Var     (name)           -> [c, Val (s (name))]
+--   | Ref     (name)           -> [c, Ref (name)]
+--   | Const   (v)              -> [c, Val (v)]
+--   | Binop   (op, l, r)       -> case evalList (c, {l, r}) of 
+--                                   [c1, {Val (lVal), Val (rVal)}] -> [c1, Val (evalOp (op, lVal, rVal))] 
+--                                 esac
+--   | Ignore  (exp)            -> case eval (c, exp) of [c1, _] -> [c1, Void] esac
+--   esac
+-- }
 
+fun eval (c@[st, w], expr) {
+  case expr of
+      Assn (x, e)             -> case evalList (c, {x, e}) of
+                                   [[st, w], { Ref (x), v }] -> [[st <- [x, v], w], v]
+                                 esac
+    | Seq (stmt1, stmt2)      -> eval (eval ([st, w], stmt1).fst, stmt2)
+    | Skip                    -> [[st, w], 0]
+    | Read (x)                -> case readWorld (w) of 
+                                   [new_x, new_w] -> [[st <- [x, new_x], new_w], 0]
+                                 esac
+    | Write (e)               -> case eval (c, e) of
+                                   [[st, w], v] -> [[st, writeWorld (v, w)], 0]
+                                 esac
+    | If (cond, stmt1, stmt2) -> case eval (c, cond) of
+                                   [c, 0] -> eval (c, stmt2)
+                                 | [c, _] -> eval (c, stmt1)
+                                 esac
+    | While (cond, body)      -> case eval (c, cond) of
+                                   x@[c, 0] -> x
+                                 | [c, _]   -> eval (eval (c, body).fst, expr) 
+                                 esac
+    | DoWhile (body, cond)    -> case eval (c, body) of
+                                   [c, _] -> case eval (c, cond) of
+                                               [c, 0] -> [c, 0]
+                                             | [c, _] -> eval (c, expr)
+                                             esac
+                                 esac
+    | Var (x)                 -> [c, st (x)]
+    | Ref (x)                 -> [c, Ref (x)]
+    | Const (n)               -> [c, n]
+    | Binop (op, l, r)        -> case evalList (c, {l, r}) of
+                                   [c, {x, y}] -> [c, evalOp (op, x, y)]
+                                 esac
+    | Ignore (e)              -> case eval (c, e) of
+                                   [c, _] -> [c, 0]
+                                 esac
+    | _ -> failure ("this eval: {%s} is not yet implemented\n", expr.string)
+  esac
+}
 
 -- Evaluates a program with a given input and returns an output
 public fun evalExpr (input, expr) {

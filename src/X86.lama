@@ -347,6 +347,59 @@ fun suffix (op) {
   esac
 }
 
+-- Generates x86 instructions for binary operations
+fun compileBinop(op, x, y) {
+  -- for +, -
+  fun compile1(op, x, y) {
+    if stackOpnd (x) && stackOpnd (y) then {Mov (x, eax), Binop (op, eax, y)} else {Binop (op, x, y)} fi
+  }
+
+  -- for *
+  fun compile2(op, x, y) {
+    if stackOpnd (x) && stackOpnd (y) then {Mov (y, eax), Binop (op, x, eax), Mov (eax, y)} else {Binop (op, x, y)} fi
+  }
+
+  -- for /, %
+  fun compile3(op, x, y, reg) {
+    {Mov (y, eax), Cltd, IDiv (x), Mov  (reg, y)}
+  }
+
+  -- for <, <=, ==, !=, >=, >
+  fun compile4(op, x, y) {
+    if memOpnd (x)
+    then {Binop ("^", eax, eax), Mov   (x, edx), Binop ("cmp", edx, y), Set (suffix (op), "%al"), Mov (eax, y)}
+    else {Binop ("^", eax, eax), Binop ("cmp", x, y), Set   (suffix (op), "%al"), Mov   (eax, y)}
+    fi
+  }
+
+  -- for &&
+  fun compile5(op, x, y) {
+    {Mov (x, eax), Binop (op, x, eax), Mov (L (0), eax), Set ("ne", "%al"), Mov (y, edx), Binop (op, y, edx),
+     Mov (L (0), edx), Set ("ne", "%dl"), Binop (op, edx, eax), Set ("ne", "%al"), Mov (eax, y)}
+  }
+
+  -- for !!
+  fun compile6(op, x, y) {
+    {Mov (y, eax), Binop (op, x, eax), Mov (L (0), eax), Set ("ne", "%al"), Mov (eax, y)}
+  }
+
+  listBuffer (case op of
+                "+"  -> compile1 (op, x, y)
+              | "-"  -> compile1 (op, x, y)
+              | "*"  -> compile2 (op, x, y)
+              | "/"  -> compile3 (op, x, y, eax)
+              | "%"  -> compile3 (op, x, y, edx)
+              | "<"  -> compile4 (op, x, y)
+              | "<=" -> compile4 (op, x, y)
+              | "==" -> compile4 (op, x, y)
+              | "!=" -> compile4 (op, x, y)
+              | ">=" -> compile4 (op, x, y)
+              | ">"  -> compile4 (op, x, y)
+              | "&&" -> compile5 (op, x, y)
+              | "!!" -> compile6 (op, x, y)
+              esac)
+}
+
 -- Compiles stack machine code into a list of x86 instructions. Takes an environment
 -- and stack machine code, returns an updated environment and x86 code.
 fun compile (env, code) {
@@ -363,7 +416,39 @@ fun compile (env, code) {
             case env.pop of
               [s, env] -> [env, code <+ Push (s) <+ Call ("Lwrite") <+ Pop (eax)]
             esac
-        | _ -> failure ("codegeneration for instruction %s is not yet implemented\n", i.string)
+        | BINOP (op)        -> case env.pop2 of
+                                 [x, y, env] -> [env.push (y), code <+> compileBinop (op, x, y)]
+                               esac
+        | LD    (name)      -> case env.addGlobal (name).allocate of
+                                 [s, env] -> [env, code <+> move (env.loc (name), s)]
+                               esac
+        | ST    (name)      -> case env.addGlobal (name).pop of
+                                 [s, env] -> [env, code <+> move (s, env.loc (name))]
+                               esac
+        | CONST (v)         -> case env.allocate of
+                                 [s, env] -> [env, code <+ Mov (L (v), s)]
+                               esac
+        | LDA   (name)      -> case env.addGlobal (name).allocate of 
+                                 [s, env] -> [env, code <+ Lea (env.loc (name), eax) <+> move (eax, s)]
+                               esac
+        | LABEL (lab)       -> if isBarrier (env) 
+                               then [retrieveStack (env, lab), code <+ Label (lab)] 
+                               else [env, code <+ Label (lab)] 
+                               fi
+        | JMP   (lab)       -> [setBarrier (setStack (env, lab)), code <+ Jmp (lab)]
+        | CJMP  (cond, lab) -> case env.pop of 
+                                 [x, env] -> [setStack (env, lab), code <+ Binop("cmp", L (0), x) <+ CJmp (cond, lab)] 
+                               esac
+        | STI               -> case env.pop2 of 
+                                 [x, y, env] -> [env.push (y), 
+                                                 code <+> listBuffer(if memOpnd (y)
+                                                                     then {Mov (x, edx), Mov (y, eax), 
+                                                                           Mov (edx, I (0, eax)), Mov (edx, y)}
+                                                                     else {Mov (x, eax), Mov (eax, I (0, y)), 
+                                                                           Mov (eax, y)}
+                                                                     fi)]
+                               esac
+        | DROP              -> case env.pop of [_, env] -> [env, code] esac
         esac
       }, [env, emptyBuffer ()], code)
   }
