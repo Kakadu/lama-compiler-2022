@@ -102,7 +102,115 @@ fun evalList (c, exprs) {
 }
 
 fun eval (c@[s, w], expr) {
-  failure ("evalExpr not implemented\n")
+  case expr of
+    Const (z) -> [c, z]
+  | Var (x) -> [c, s.lookup (x)]
+  | Ref (x) -> [c, Ref (x)]
+  | Binop (operator, l, r) -> 
+    case evalList (c, {l, r}) of
+      [c, {v1, v2}] -> [c, evalOp (operator, v1, v2)]
+    esac
+  | Skip -> [c, Ignore (Skip)]
+  | Assn (l, r) -> 
+    case evalList (c, {l, r}) of
+        [[s, w], {Ref (x), v}] -> [[s <- [x, v], w], v]
+      | [c, {ElemRef (arr, idx), v}] -> arr[idx] := v; [c, v]
+    esac
+  | Seq (s1, s2) -> 
+    case evalList (c, {s1, s2}) of
+      [c, {_, v}] -> [c, v]
+    esac
+  | Ignore (e) ->
+      case eval (c, e) of
+        [c, _] -> [c, Ignore (Skip)]
+      esac
+  | While (e, s) -> 
+    case eval (c, e) of
+      [c, n] -> 
+        if n then 
+          case eval (c, s) of
+            [c, v] -> eval (c, While (e, s))
+          esac
+        else 
+          [c, Ignore (Skip)] 
+        fi
+    esac
+  | If (e, s1, s2) -> 
+    case eval (c, e) of
+      [c, n] -> 
+        if n then 
+          eval (c, s1) 
+        else 
+          eval (c, s2)
+        fi
+    esac
+  | DoWhile (s, e) -> 
+    case eval (c, s) of 
+      [c, _] -> eval (c, While (e, s))
+    esac
+  | Scope (defs, e) -> 
+    fun addDefinition (state, def) {
+      case def of
+        Var (names) -> addNames (state, names)
+      | Fun (name, args, body) -> addFunction (state, name, args, body)
+      esac
+    }
+    var newS = foldl (addDefinition, enterScope (s), defs);
+    case eval ([newS, w], e) of
+      [[s, w], v] -> [[leaveScope (s), w], v]
+    esac
+  | Call (x, args) -> 
+    case s.lookup (x) of
+      Fun (funArgs, body) ->
+        case evalList (c, args) of
+          [[s, w], args] -> 
+            case body of 
+                External ->
+                  case evalBuiltin (x, args, w) of
+                    [v, w] -> [[s, w], v]
+                  esac
+              | _ -> 
+                fun addArgs (s, args) {
+                  case args of
+                      [z : funArgsOther, v : valsOther] -> addArgs (addName (s, z, v), [funArgsOther, valsOther])
+                    | _ -> s
+                  esac
+                }
+                var newS = addArgs (enterFunction (s), [funArgs, args]);
+                case eval ([newS, w], body) of
+                  [[newS, w], v] -> [[leaveFunction (s, getGlobal (newS)), w], v]
+                esac
+            esac
+        esac
+    esac 
+  | Set (x, e) -> eval (c, Assn (Ref (x), e))
+  | String (x) -> [c, x] 
+  | Elem (e, i) -> 
+    case evalList (c, {e, i}) of
+        [c, {Sexp (_, x), i}] -> [c, x[i]]
+      | [c, {x, i}] -> [c, x[i]]
+    esac 
+  | ElemRef (e, i) ->
+    case evalList (c, {e, i}) of
+      [c, {Sexp (_, x), i}] -> [c, ElemRef (x, i)]
+      | [c, {x, i}] -> [c, ElemRef (x, i)]
+    esac 
+  | Array (els) -> 
+    case evalList (c, els) of
+      [c, els] -> [c, listArray (els)]
+    esac
+  | Sexp (x, e) ->
+    case evalList (c, e) of 
+      [c, args] -> [c, Sexp (x, listArray (args))]
+    esac
+  | Builtin(f, args) ->
+    case evalList (c, args) of
+      [[s, w], args] ->
+        case evalBuiltin (f, args, w) of
+          [v, w] -> [[s, w], v]
+        esac
+    esac
+  esac
 }
 
 
