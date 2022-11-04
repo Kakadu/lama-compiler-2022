@@ -350,25 +350,74 @@ fun suffix (op) {
 -- Compiles stack machine code into a list of x86 instructions. Takes an environment
 -- and stack machine code, returns an updated environment and x86 code.
 fun compile (env, code) {
-  fun compile (env, code) {
-    foldl (
-      fun ([env, scode], i) {
-        var code = scode <+ Meta ("# " ++ showSMInsn (i) ++ "\n");
-        case i of
-          READ ->
-            case env.allocate of
-              [s, env] -> [env, code <+ Call ("Lread") <+ Mov (eax, s)]
-            esac             
-        | WRITE ->
-            case env.pop of
-              [s, env] -> [env, code <+ Push (s) <+ Call ("Lwrite") <+ Pop (eax)]
-            esac
-        | _ -> failure ("codegeneration for instruction %s is not yet implemented\n", i.string)
+  foldl (
+    fun ([env, scode], i) {
+      var code = scode <+ Meta ("# " ++ showSMInsn (i) ++ "\n");
+      case i of
+        READ   ->
+          case env.allocate of
+            [s, env] -> [env, code <+ Call ("Lread") <+ Mov (eax, s)]
+          esac             
+      | WRITE  ->
+          case env.pop of
+            [s, env] -> [env, code <+ Push (s) <+ Call ("Lwrite") <+ Pop (eax)]
+          esac
+      | ST (x) ->
+        case env.addGlobal(x).pop of
+          [s, env] -> [env.push (x), code <+> move (s, env.loc (x))]
         esac
-      }, [env, emptyBuffer ()], code)
-  }
-
-  compile (env, code) 
+      | STI ->
+        case env.pop2 of
+          [s1, s2, env] -> [env.push(s1), code <+> move (s1, I (0, s2))]
+        esac
+      | LD (x) ->
+        case env.addGlobal(x).allocate of
+          [s, env] -> [env, code <+> move (env.loc (x), s)]
+        esac
+      | LDA (x) ->
+        case env.addGlobal(x).allocate of
+          [s, env] -> [env, code <+ Lea (env.loc (x), s)]
+        esac
+      | CONST (n) -> 
+        case env.allocate of
+          [s, env] -> [env, code <+> move (L (n), s)]
+        esac
+      | LABEL (l) -> 
+        [if env.isBarrier then env.retrieveStack(l) else env fi, code <+ Label (l)]
+      | JMP (l) -> [env.setBarrier, code <+ Jmp (l)]
+      | CJMP (c, l) -> 
+        case env.pop of
+          [s, env] -> [env.setStack(l), code <+> move (s, eax) <+ Binop ("cmp", L (0), eax) <+ CJmp (c, l)]
+        esac
+      | DROP   -> 
+        case env.pop of
+          [_, env] -> [env, code]
+        esac
+      | BINOP (op) ->
+        case env.pop2 of
+          [s1, s2, env] -> 
+            case env.allocate of
+              [s, env] -> 
+                case op of 
+                  "/"  -> [env, code <+> move (s2, eax) <+ Cltd <+ IDiv (s1) <+> move (eax, s)]
+                | "%"  -> [env, code <+> move (s2, eax) <+ Cltd <+ IDiv (s1) <+> move (edx, s)]
+                | "+"  -> [env, code <+> move (s2, eax) <+ Binop (op, s1, eax) <+> move (eax, s)]
+                | "-"  -> [env, code <+> move (s2, eax) <+ Binop (op, s1, eax) <+> move (eax, s)]
+                | "*"  -> [env, code <+> move (s2, eax) <+ Binop (op, s1, eax) <+> move (eax, s)]
+                | "&&" -> [env, code <+> move (s1, eax) <+ Binop (op, s1, eax) <+> move (L (0), eax) 
+                                <+ Set ("ne", "%al") <+> move (s2, edx) <+ Binop (op, s2, edx) 
+                                <+> move (L (0), edx) <+ Set ("ne", "%dl") <+ Binop (op, eax, edx) 
+                                <+ Set ("ne", "%al") <+> move (eax, s)]
+                | "!!" -> [env, code <+> move (s2, eax) <+ Binop (op, s1, eax) <+> move (L (0), eax) 
+                                <+ Set ("ne", "%al") <+> move (eax, s)]
+                |  _  ->  [env, code <+> move (s2, eax) <+ Binop ("cmp", s1, eax) <+> move (L (0), eax) 
+                                <+ Set (suffix (op), "%al") <+> move (eax, s)]
+                esac
+            esac
+        esac
+      | _ -> failure ("codegeneration for instruction %s is not yet implemented\n", i.string)
+      esac
+    }, [env, emptyBuffer ()], code)
 }
 
 -- A top-level codegeneration function. Takes a driver's environment and a stack machine program,

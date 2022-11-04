@@ -63,8 +63,54 @@ fun evalList (c, exprs) {
   esac
 }
 
-fun eval (c@[s, w], expr) {
-  failure ("evalExpr not implemented\n")
+fun eval (c@[st, w], expr) {
+  case expr of
+    Const (const) -> [c, const]
+  | Var (v) -> [c, st(v)]
+  | Ref (x) -> [c, Ref (x)]
+  | Ignore (e) -> 
+    case eval (c, e) of
+      [c, _] -> [c, None] 
+    esac
+  | Binop (op, l, r) -> 
+    case evalList (c, {l, r}) of
+      [c, {v1, v2}] -> [c, evalOp (op, v1, v2)]
+    esac
+  | Skip -> [c, None]
+  | Assn (l, r) -> 
+    case evalList (c, {l, r}) of 
+      [[st, w], {Ref (x), v}] -> [[st <- [x, v], w], v]
+    esac
+  | Read (s) -> 
+    case readWorld (w) of 
+      [n, nw] -> [[st <- [s, n], nw], None]
+    esac
+  | Write (e) -> 
+    case eval (c, e) of 
+      [[st, w], v] -> [[st, writeWorld (v, w)], None]
+    esac 
+  | Seq (s1, s2) -> 
+    case evalList (c, {s1, s2}) of
+      [c, {_, v}] -> [c, v]
+    esac
+  | While (cond, body) -> 
+    case eval (c, cond) of
+      [c, 0] -> [c, None]
+    | [c, _] -> 
+      case eval (c, body) of
+        [c, _] -> eval (c, expr)
+      esac
+    esac
+  | DoWhile (body, cond) ->
+    case eval (c, body) of
+      [c, _] -> eval (c, While (cond, body))
+    esac
+  | If (cond, thenBody, elseBody) ->
+    case eval (c, cond) of
+      [c, 0] -> eval (c, elseBody)
+    | [c, _] -> eval (c, thenBody)
+    esac
+  esac
 }
 
 
