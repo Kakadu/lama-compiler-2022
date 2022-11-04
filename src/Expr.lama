@@ -64,9 +64,51 @@ fun evalList (c, exprs) {
 }
 
 fun eval (c@[s, w], expr) {
-  failure ("evalExpr not implemented\n")
+  case expr of
+    Assn (e1, e2) ->
+      case evalList (c, { e1, e2 }) of
+        [[s, w], { Ref (x), Val (y) }] -> [[s <- [x, y], w], Val (y)]
+      esac
+  | Seq (e1, e2) ->
+      case evalList (c, { e1, e2 }) of
+        [c, { l, r }] -> [c, r]
+      esac
+  | Skip -> [c, Void]
+  | Read (x) ->
+      case readWorld (w) of
+        [v, w] -> [[s <- [x, v], w], Void]
+      esac
+  | Write (e) ->
+      case eval (c, e) of
+        [[s, w], Val (x)] -> [[s, writeWorld (x, w)], Void]
+      esac
+  | If (cond, e1, e2) ->
+      case eval (c, cond) of
+        [c, Val (v)] -> eval (c, if v then e1 else e2 fi)
+      esac
+  | While (cond, e) ->
+      case eval (c, cond) of
+        [c, Val (v)] ->
+          if v then
+            case eval (c, e) of [c, _] -> eval (c, expr) esac
+          else
+            [c, Void]
+          fi
+      esac
+  | DoWhile (e, cond) ->
+      case eval (c, e) of
+        [c, _] -> eval (c, While (cond, e))
+      esac
+  | Var (x) -> [c, Val (s (x))]
+  | Ref (x) -> [c, Ref (x)]
+  | Const (n) -> [c, Val (n)]
+  | Binop (str_op, e1, e2) ->
+      case evalList (c, { e1, e2 }) of
+        [c, { Val (x), Val (y) }] -> [c, Val (evalOp (str_op, x, y))]
+      esac
+  | Ignore (e) -> case eval (c, e) of [c, v] -> [c, Void] esac
+  esac
 }
-
 
 -- Evaluates a program with a given input and returns an output
 public fun evalExpr (input, expr) {

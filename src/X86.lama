@@ -405,38 +405,48 @@ fun compile (env, code) {
         var code = scode <+ Meta ("# " ++ showSMInsn (i) ++ "\n");
         case i of
           READ ->
-            case env.allocate of
+            case allocate (env) of
               [s, env] -> [env, code <+ Call ("Lread") <+ Mov (eax, s)]
-            esac             
+            esac
         | WRITE ->
-            case env.pop of
+            case pop (env) of
               [s, env] -> [env, code <+ Push (s) <+ Call ("Lwrite") <+ Pop (eax)]
             esac
         | CONST (n) ->
-            case env.allocate of
+            case allocate (env) of
               [s, env] -> [env, code <+ Mov (L (n), s)]
             esac
         | ST (x) ->
             case env.addGlobal (x).pop of
               [s, env] -> [env, code <+> move (s, env.loc (x))]
             esac
+        | STI ->
+          case pop (env) of [x, env] ->
+            [env, code <+ Mov (x, eax) <+ Mov (eax, I (0, env.peek)) <+ Mov (eax, env.peek)]
+          esac
         | LD (x) ->
-            case env.allocate of
+            case allocate (env) of
               [s, env] -> [env, code <+> move (env.loc (x), s)]
             esac
+        | LDA (x) ->
+          case env.addGlobal (x).allocate of
+            [s, env] -> [env, code <+ Lea (env.loc (x), eax) <+ Mov (eax, s)]
+          esac
         | BINOP (op) ->
-            case env.pop2 of
+            case pop2 (env) of
               [x, y, env] ->
-                case env.allocate of [s, env] ->
+                case allocate (env) of [s, env] ->
                   compileBinop (op, x, y, env, code, s)
                 esac
            esac
-        | LABEL (l) -> [env, code <+ Label (l)]
-        | JMP (l) -> [env, code <+ Jmp (l)]
+        | LABEL (l) -> [if env.isBarrier then env.retrieveStack (l) else env fi, code <+ Label (l)]
+        | JMP (l) -> [env.setStack (l).setBarrier, code <+ Jmp (l)]
         | CJMP (c, l) ->
-          case env.pop of [s, env] ->
-              [env, code <+ zeroReg (edx) <+ Binop("cmp", edx, s) <+ CJmp (c, l)]
+          case pop (env) of [s, env] ->
+              [env.setStack (l), code <+ zeroReg (edx) <+ Binop("cmp", edx, s) <+ CJmp (c, l)]
           esac
+        | DROP -> case env.pop of [_, env] -> [env, code] esac
+        | DUP -> var duped = env.peek; case env.allocate of [s, env] -> [env, code <+ Mov (duped, s)] esac
         | _ -> failure ("codegeneration for instruction %s is not yet implemented\n", i.string)
         esac
       }, [env, emptyBuffer ()], code)
