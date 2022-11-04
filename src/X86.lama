@@ -347,6 +347,64 @@ fun suffix (op) {
   esac
 }
 
+fun compileBinop (op, l, r) {
+  fun compileBasicOp (op, l, r) {
+      emptyBuffer() <+ Mov (l, eax)
+                    <+ Binop (op, r, eax)
+                    <+ Mov (eax, l)
+  }
+
+  fun compileCompareOp (op, l, r) {
+    emptyBuffer() <+ Mov (l, edx)
+                  <+ Binop ("cmp", r, edx)
+                  <+ Mov (L (0), eax)
+                  <+ Set (suffix(op), "%al") <+ Mov (eax, l)
+  }
+
+  fun compileDivOp (op, l, r) {
+     var buf = emptyBuffer() <+ Mov (l, eax) <+ Cltd
+                             <+ IDiv (r);
+
+    case op of
+      "/" -> buf <+ Mov (eax, l)
+    | "%" -> buf <+ Mov (edx, l)
+    esac
+  }
+
+  fun compileLogicOp (op, l, r) {
+    emptyBuffer() <+ Mov (l, edx)
+                  <+ Mov (L(0), eax)
+                  <+ Binop ("cmp", edx, eax)
+                  <+ Set (suffix("!="), "%al")
+                  <+ Push (eax)
+                  <+ Mov (r, edx)
+                  <+ Mov (L (0), eax)
+                  <+ Binop ("cmp", edx, eax)
+                  <+ Mov (L(0), edx)
+                  <+ Set (suffix("!="), "%dl")
+                  <+ Pop (eax)
+                  <+ Binop (op, edx, eax)
+                  <+ Mov (eax, l)
+  }
+
+  case op of
+    "*"   -> compileBasicOp(op, l, r)
+  | "+"   -> compileBasicOp(op, l, r)
+  | "-"   -> compileBasicOp(op, l, r)
+  | ">"   -> compileCompareOp(op, l, r)
+  | ">="  -> compileCompareOp(op, l, r)
+  | "<"   -> compileCompareOp(op, l, r)
+  | "<="  -> compileCompareOp(op, l, r)
+  | "=="  -> compileCompareOp(op, l, r)
+  | "!="  -> compileCompareOp(op, l, r)
+  | "%"   -> compileDivOp(op, l, r)
+  | "/"   -> compileDivOp(op, l, r)
+  | "&&"  -> compileLogicOp(op, l, r)
+  | "!!"  -> compileLogicOp(op, l, r)
+  | _ -> failure ("Binop evaluation error: unknown operator")
+  esac
+}
+
 -- Compiles stack machine code into a list of x86 instructions. Takes an environment
 -- and stack machine code, returns an updated environment and x86 code.
 fun compile (env, code) {
@@ -363,7 +421,45 @@ fun compile (env, code) {
             case env.pop of
               [s, env] -> [env, code <+ Push (s) <+ Call ("Lwrite") <+ Pop (eax)]
             esac
-        | _ -> failure ("codegeneration for instruction %s is not yet implemented\n", i.string)
+        | CONST (n) ->
+            case env.allocate of
+              [s, env] -> [env, code <+> move (L (n), s)]
+            esac
+        | LD (x) ->
+            case env.addGlobal(x).allocate of
+              [s, env] -> [env, code <+> move (env.loc(x), s)]
+            esac
+        | ST (x) ->
+            env := env.addGlobal(x); [env, code <+> move (env.peek, env.loc(x))]
+            --case env.addGlobal(x).pop of
+            --  [s, env] -> [env, code <+> move(env.peek, env.loc(x))]
+            --esac
+        | BINOP(op) ->
+            case env.pop2 of
+              [r, l, env] -> [env.push(l), code <+> compileBinop(op, l, r)]
+            esac
+        | LABEL (s) ->
+            var new_env = if env.isBarrier then env.retrieveStack(s) else env fi;
+            [new_env, code <+ Label (s)]
+        | JMP (lbl) ->
+            [env.setStack(lbl).setBarrier, code <+ Jmp (lbl)]
+        | CJMP (cond, lbl) ->
+            case env.pop of
+              [s, env] -> [env.setStack(lbl), code <+ Mov (L (0), eax) <+ Binop ("cmp", eax, s) <+ CJmp (cond, lbl)]
+            esac
+        | DUP ->
+            var d = env.peek;
+            case env.allocate of [s, env] -> [env, code <+ Mov (d, s)] esac
+        | DROP ->
+            case env.pop of [_, env] -> [env, code] esac
+        | LDA (x) ->
+            case env.addGlobal(x).allocate of [s, env] ->
+              [env, code <+ Lea (env.loc(x), eax) <+ Mov (eax, s)]
+            esac
+        | STI ->
+            case env.pop of [v, env] ->
+              [env, code <+ Mov (v, eax) <+ Mov (eax, I (0, env.peek)) <+ Mov (eax, env.peek)]
+            esac
         esac
       }, [env, emptyBuffer ()], code)
   }
