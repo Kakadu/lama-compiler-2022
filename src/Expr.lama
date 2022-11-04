@@ -6,16 +6,16 @@ import World;
 
 -- As association map which maps "\otimes" into "\oplus"
 var ops = {
-  ["+" , infix + ],
-  ["-" , infix - ],
-  ["*" , infix * ],
-  ["/" , infix / ],
-  ["%" , infix % ],
+  ["+", infix +],
+  ["-", infix -],
+  ["*", infix *],
+  ["/", infix /],
+  ["%", infix %],
   ["==", infix ==],
   ["!=", infix !=],
-  ["<" , infix < ],
+  ["<", infix <],
   ["<=", infix <=],
-  [">" , infix > ],
+  [">", infix >],
   [">=", infix >=],
   ["&&", infix &&],
   ["!!", infix !!]
@@ -23,9 +23,9 @@ var ops = {
 
 -- The evaluator for infix operators: takes an operator as a string
 -- and two operand values, and returns the result
-public fun evalOp (op, l, r) {
-  case assoc (ops, op) of
-    Some (f) -> f (l, r)
+public fun evalOp(op, l, r) {
+  case assoc(ops, op) of
+    Some (f) -> f(l, r)
   esac
 }
 
@@ -51,26 +51,72 @@ public fun evalOp (op, l, r) {
 
 -- Evaluates a list of expressions, properly threading a configurations.
 -- Returns the final configuration and the list of values
-fun evalList (c, exprs) {
-  case foldl (fun ([c, vals], e) {
-                case eval (c, e) of
-                  [c, v] -> [c, v : vals]
-                esac
-              },
-              [c, {}],
-              exprs) of
-    [c, vals] -> [c, reverse (vals)]
+fun evalList(c, exprs) {
+  case foldl(fun ([c, vals], e) {
+    case eval(c, e) of
+      [c, v] -> [c, v:vals]
+    esac
+  },
+    [c, { }],
+    exprs) of
+    [c, vals] -> [c, reverse(vals)]
   esac
 }
 
-fun eval (c@[s, w], expr) {
-  failure ("evalExpr not implemented\n")
+fun eval(c@[s, w], expr) {
+  case expr of
+      Read (x)          ->
+        case readWorld(w) of [v, w] ->
+          [[s <- [x, v], w], None]
+        esac
+    | Write (a)         ->
+      case eval(c, a) of [c, L (v)] ->
+        case writeWorld(v, w) of w ->
+          [[s, w], None]
+        esac
+      esac
+    | Assn (a, b)       ->
+      case eval(c, a) of [c, R (x)] ->
+        case eval(c, b) of [c@[s, w], v@L (vi)] ->
+          [[s <- [x, vi], w], v]
+        esac
+      esac
+    | Seq (a, b)        ->
+      case eval(c, a) of [c, _] ->
+        eval(c, b)
+      esac
+    | Skip              -> [c, None]
+    | If (cond, a, b)   ->
+      case eval(c, cond) of [c, L (v)] ->
+        eval(c, if v then a else b fi)
+      esac
+    | While (cond, a)   ->
+      case eval(c, cond) of [c, L (v)] ->
+        eval(c, if v then Seq(a, expr) else Skip fi)
+      esac
+    | DoWhile (x, cond) -> eval(c, Seq(x, While(cond, x)))
+    | Var (x)           -> [c, L(s(x))]
+    | Ref (x)           -> [c, R(x)]
+    | Const (n)         -> [c, L(n)]
+    | Binop (op, a, b)  ->
+      case eval(c, a) of [c, L (a_val)] ->
+        case eval(c, b) of [c, L (b_val)] ->
+          [c, L(evalOp(op, a_val, b_val))]
+        esac
+      esac
+    | Ignore (a)        ->
+      case eval(c, a) of [c, _] ->
+        [c, None]
+      esac
+    | _                 -> failure("Unexpected instruction in evalExpr")
+  esac
 }
 
 
 -- Evaluates a program with a given input and returns an output
-public fun evalExpr (input, expr) {
-  case eval ([emptyState, createWorld (input)], expr) of
+public fun evalExpr(input, expr) {
+  case eval([emptyState, createWorld(input)], expr) of
     [c, _] -> c.snd.getOutput
   esac
 }
+  
