@@ -347,6 +347,69 @@ fun suffix (op) {
   esac
 }
 
+  -- left operand is source, right operand is destination
+fun compileBinop (op, l, r) { 
+  fun compileArithmetic (op, l, r) {
+    if memOpnd (l) && memOpnd (r) then 
+      listBuffer({ Mov (r, eax), Binop (op, l, eax), Mov (eax, r) })
+    else
+      singletonBuffer (Binop (op, l, r))
+    fi
+  }
+
+  fun compileArithmeticDivision (op, l, r) {
+    singletonBuffer (Mov (r, eax)) <+
+    Cltd <+
+    IDiv (l) <+
+      if compare (op, "/") == 0 then 
+        Mov (eax, r) 
+      else 
+        Mov (edx, r)
+      fi
+  }
+
+  fun compileRelational (op, l, r) {
+    singletonBuffer (Mov (L (0), eax)) <+>
+      if memOpnd (l) then
+        singletonBuffer (Mov (l, edx)) <+ Binop ("cmp", edx, r)
+      else
+        singletonBuffer (Binop ("cmp", l, r))
+      fi
+    <+> listBuffer({ Set (suffix (op), "%al"), Mov (eax, r) })  
+  }  
+
+  fun compileLogical (op, l, r) {
+    fun toBin (r32, r8, value) {
+      listBuffer ({ 
+        Mov (L (0), r32), 
+        Binop ("cmp", value, r32), 
+        Set (suffix ("!="), r8)}) 
+    }
+    toBin (eax, "%al", l) <+>
+    toBin (edx, "%dl", r) <+
+    Binop (op, eax, edx) <+
+    Mov (edx, r)
+  }
+
+  case op of
+      "+"  -> compileArithmetic (op, l, r)
+    | "-"  -> compileArithmetic (op, l, r)
+    | "*"  -> compileArithmetic (op, l, r)
+    | "/"  -> compileArithmeticDivision (op, l, r)
+    | "%"  -> compileArithmeticDivision (op, l, r)
+    | "<"  -> compileRelational (op, l, r)
+    | ">"  -> compileRelational (op, l, r)     
+    | "<=" -> compileRelational (op, l, r)   
+    | ">=" -> compileRelational (op, l, r)
+    | "==" -> compileRelational (op, l, r)
+    | "!=" -> compileRelational (op, l, r)    
+    | "&&" -> compileLogical (op, l, r)
+    | "!!" -> compileLogical (op, l, r)
+    | "^" -> compileLogical (op, l, r) 
+    | _ -> failure ("unexpected binary operator: '%s'\n", op)  
+  esac
+}
+
 -- Compiles stack machine code into a list of x86 instructions. Takes an environment
 -- and stack machine code, returns an updated environment and x86 code.
 fun compile (env, code) {
@@ -363,6 +426,47 @@ fun compile (env, code) {
             case env.pop of
               [s, env] -> [env, code <+ Push (s) <+ Call ("Lwrite") <+ Pop (eax)]
             esac
+        | BINOP (op) ->
+            case env.pop2 of
+              [x, y, env] -> [env.push (y), code <+> compileBinop (op, x, y)]
+            esac                      
+        | LD (x) ->
+            case env.addGlobal (x).allocate of
+              [s, env] -> [env, code <+> move (env.loc (x), s)]
+            esac
+        | LDA (x) ->
+            case env.addGlobal (x).allocate of 
+              [s, env] -> [env, code <+ Lea (env.loc (x), eax) <+ Mov (eax, s)]
+            esac
+        | ST (x) ->
+            case env.addGlobal (x).pop of
+              [s, env] -> [env, code <+> move (s, env.loc (x))]
+            esac
+        | STI ->
+            case env.pop2 of
+              [v, x, env] -> [env.push (v), code <+> move (v, I (0, x))]
+            esac
+        | CONST (n) ->
+            case env.allocate of
+              [s, env] -> [env, code <+> move (L (n), s)]
+            esac
+        | LABEL (l) -> 
+            [if isBarrier (env) then retrieveStack (env, l) else env fi, code <+ Label (l)]
+        | JMP (l) -> [setBarrier $ env.setStack (l), code <+ Jmp (l)]       
+        | CJMP (c, l) -> 
+            case env.pop of
+              [x, env] -> [env.setStack (l), code <+ Binop ("cmp", L (0), x) <+ CJmp (c, l)]
+            esac
+        | DUP ->
+            case env.peek of v ->
+              case env.allocate of [s, env] -> 
+                [env, code <+> move (v, s)]
+              esac
+            esac
+        | DROP -> 
+          case env.pop of 
+            [_, env] -> [env, code] 
+          esac
         | _ -> failure ("codegeneration for instruction %s is not yet implemented\n", i.string)
         esac
       }, [env, emptyBuffer ()], code)
