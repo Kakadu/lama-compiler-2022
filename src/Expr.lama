@@ -63,33 +63,47 @@ fun evalList (c, exprs) {
   esac
 }
 
-fun eval (c@[s, w], expr) {
-  failure ("evalExpr not implemented\n")
+fun eval (c@[st, w], expr) {
+  case expr of
+      Assn (exp1, exp2) -> 
+        case evalList (c, {exp1, exp2}) of 
+          [[st, w], {ref, v}] -> [[st <- [ref, v], w], v]
+        esac
+    | Seq (x, y) -> 
+        case evalList (c, {x, y}) of 
+          [c, {_ , v}] -> [c, v]
+        esac
+    | Read (s) -> 
+        case readWorld(w) of 
+          [k1, k2] -> [[st <- [s, k1], k2], None]
+        esac
+    | Write (exp) -> 
+        case eval(c, exp) of
+          [[st2, w2], v] -> [[st2, writeWorld(v, w2)], None]
+        esac
+    | If (expr, stmt1, stmt2) ->
+        if eval(c, expr)[1] then eval(c, stmt1) else eval(c, stmt2) fi
+    | Binop (s, exp1, exp2) -> 
+        case evalList (c, {exp1, exp2}) of 
+          [c, {v1, v2}] -> [c, evalOp(s, v1, v2)]
+        esac
+    | Ref     (s)         -> [c, s]
+    | Ignore  (exp)       -> [eval(c, exp)[0], None]
+    | Skip                -> [c, None]
+    | Var (s)             -> [c, st(s)]
+    | Const (i)           -> [c, i]
+    | While (cond, body)  -> 
+        while eval(c, cond)[1] do
+          c := eval(c, body)[0]
+        od;
+        [c, None]
+    | DoWhile (exp, cond) -> 
+        do
+          c := eval(c, exp)[0]
+        while eval(c, cond)[1] od;
+        [c, None]
+  esac
 }
-
--- public fun evalExpr (st, expr) {
---   case expr of
---       Var (s) -> st(s)
---     | Const (i) -> i
---     | Binop (s, exp1, exp2) -> (
---       case s of 
---           "*"  -> evalExpr(st, exp1) *  evalExpr(st, exp2)
---         | "+"  -> evalExpr(st, exp1) +  evalExpr(st, exp2)
---         | "-"  -> evalExpr(st, exp1) -  evalExpr(st, exp2)
---         | "/"  -> evalExpr(st, exp1) /  evalExpr(st, exp2)
---         | "%"  -> evalExpr(st, exp1) %  evalExpr(st, exp2)
---         | "<"  -> evalExpr(st, exp1) <  evalExpr(st, exp2)
---         | "<=" -> evalExpr(st, exp1) <= evalExpr(st, exp2)
---         | ">"  -> evalExpr(st, exp1) >  evalExpr(st, exp2)
---         | ">=" -> evalExpr(st, exp1) >= evalExpr(st, exp2)
---         | "!!" -> evalExpr(st, exp1) !! evalExpr(st, exp2)
---         | "&&" -> evalExpr(st, exp1) && evalExpr(st, exp2)
---         | "==" -> evalExpr(st, exp1) == evalExpr(st, exp2)
---         | "!=" -> evalExpr(st, exp1) != evalExpr(st, exp2)
---       esac
---     )
---   esac
--- }
 
 
 -- Evaluates a program with a given input and returns an output
