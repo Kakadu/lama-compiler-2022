@@ -94,11 +94,107 @@ fun evalList (c, exprs) {
   esac
 }
 
-(* Assignment *)
-fun eval (c@[s, w], expr) {
-  failure ("evalExpr not implemented\n")
+fun eval (c@[state, world], expr) {
+  case expr of
+    Const (n) -> [c, n]
+  | Var (x) ->
+      checkVar (state, x);
+      case lookup (state, x) of
+        Var (v) -> [c, v]
+      esac
+  | Ref (x) -> checkVar (state, x); [c, Ref (x)]
+  | Binop (op, l, r) ->
+      case evalList (c, {l, r}) of
+        [new_config, {x, y}] ->
+          [new_config, evalOp (op, x, y)]
+      esac
+  | Skip -> [c, Void]
+  | Assn (expr1, expr2) ->
+      case evalList (c, {expr1, expr2}) of
+        [[new_state, new_world], {Ref (x), v}] ->
+          [[new_state <- [x, Var (v)], new_world], v]
+      esac
+  | Read (x) ->
+      checkVar (state, x);
+      case readWorld (world) of
+        [value, new_world] ->
+          [[state <- [x, Var (value)], new_world], Void]
+      esac
+  | Write (expr) ->
+      case eval (c, expr) of
+        [[new_state, new_world], v] ->
+          [[new_state, writeWorld (v, new_world)], Void]
+      esac
+  | Seq (expr1, expr2) ->
+      case evalList (c, {expr1, expr2}) of
+        [new_config, {_, expr2_res}] ->
+          [new_config, expr2_res]
+      esac
+  | If (cond_expr, true_expr, false_expr) ->
+      case eval (c, cond_expr) of
+        [new_config, cond_val] ->
+          eval (new_config, if cond_val then true_expr else false_expr fi)
+      esac
+  | While (cond_expr, body_expr) ->
+      case eval (c, cond_expr) of
+        [new_config, cond_val] ->
+          if cond_val then
+            case eval (new_config, body_expr) of
+              [newest_config, _] -> eval (newest_config, While (cond_expr, body_expr))
+            esac
+          else
+            [new_config, Void]
+          fi
+      esac
+  | DoWhile (body_expr, cond_expr) ->
+      case eval (c, body_expr) of
+        [new_config, _] -> eval (new_config, While (cond_expr, body_expr))
+      esac
+  | Ignore (expr) ->
+      case eval (c, expr) of
+        [new_config, _] -> [new_config, Void]
+      esac
+  | Scope (defs, expr) -> evalScope (c, defs, expr)
+  | Call (name, args) ->
+      checkFun (state, name);
+      case lookup (state, name) of
+        Fun (arg_names, body) ->
+          case evalList (c, args) of
+            [[new_state, new_world], arg_values] ->
+              case addArgumentValuesToScope (enterFunction (state), arg_names, arg_values) of
+                newest_state ->
+                  case eval ([newest_state, new_world], body) of
+                    [[newest_state, newest_world], value] ->
+                      [[leaveFunction (new_state, getGlobal (newest_state)), newest_world], value]
+                  esac
+              esac
+          esac
+      esac
+  esac
 }
-(* End *)
+
+fun addArgumentValuesToScope (state, args, values) {
+  case [args, values] of
+    [arg:args, value:values] -> addArgumentValuesToScope (addName (state, arg, Var (value)), args, values)
+  | [{}, {}] -> state
+  esac
+}
+
+fun evalScope (c@[state, world], definitions, expr) {
+  var new_config = eval ([foldl (
+      fun (new_state, definition) {
+        case definition of
+          Fun (name, args, body) -> addFunction (new_state, name, args, body)
+          | Var (vars) -> addNames (new_state, vars)
+        esac
+      },
+      enterScope(state), definitions), world], expr
+  );
+  var new_state = new_config[0][0];
+  var new_world = new_config[0][1];
+  var value = new_config[1];
+  [[leaveScope (new_state), new_world], value]
+}
 
 -- Evaluates a program with a given input and returns an output
 public fun evalExpr (input, expr) {
