@@ -82,18 +82,18 @@ fun expandScope (defs, expr) {
   }
 
   case 
-    foldr (fun ([defs, expr], def) {
+    foldr (fun ([fdefs, vdefs, expr], def) {
              case def of
-               f@Fun (_, _, _) -> [f : defs, expr]
+               f@Fun (_, _, _) -> [f : fdefs, vdefs, expr]
              | Var (ds)      ->
                  case expandDefs (ds, expr) of
-                   [ds, expr] -> [Var (ds) : defs, expr]
+                   [ds, expr] -> [fdefs, ds +++ vdefs, expr]
                  esac
              esac
            },
-           [{}, expr],
+           [{}, {}, expr],
            defs) of
-    [defs, expr] -> Scope (defs, expr)
+    [fdefs, vdefs, expr] -> Scope (Var(vdefs) : fdefs, expr)
   esac  
 }
 
@@ -106,27 +106,30 @@ fun distributeScope (expr, exprConstructor) {
 }
 
 var ifp = memo $ eta syntax (
-      loc=pos kIf cond=exp kThen sTrue=exp kFi                      {fun (a) {assertVoid(a, If(cond(Val), sTrue(Void), Skip), loc)}}   |
-              kIf cond=exp kThen sTrue=exp kElse sFalse=exp kFi     {fun (a) {If(cond(Val), sTrue(a), sFalse(a))}} |
-              kIf cond=exp kThen sTrue=exp rest=elifsp              {fun (a) {If(cond(Val), sTrue(a), rest(a))}}),
+      loc=pos kIf cond=exp kThen sTrue=scopeExpr kFi                      {fun (a) {assertVoid(a, If(cond(Val), sTrue(Void), Skip), loc)}}   |
+              kIf cond=exp kThen sTrue=scopeExpr kElse sFalse=exp kFi     {fun (a) {If(cond(Val), sTrue(a), sFalse(a))}} |
+              kIf cond=exp kThen sTrue=scopeExpr rest=elifsp              {fun (a) {If(cond(Val), sTrue(a), rest(a))}}),
     elifsp = memo $ eta syntax (
-              kElif cond=exp kThen sTrue=exp rest=elifsp            {fun (a) {If(cond(Val), sTrue(a), rest(a))}}   |
-              kElif cond=exp kThen sTrue=exp kElse sFalse=exp kFi   {fun (a) {If(cond(Val), sTrue(a), sFalse(a))}} |
-      loc=pos kElif cond=exp kThen sTrue=exp kFi                    {fun (a) {assertVoid(a, If(cond(Val), sTrue(Void), Skip), loc)}}),
+              kElif cond=exp kThen sTrue=scopeExpr rest=elifsp            {fun (a) {If(cond(Val), sTrue(a), rest(a))}}   |
+              kElif cond=exp kThen sTrue=scopeExpr kElse sFalse=exp kFi   {fun (a) {If(cond(Val), sTrue(a), sFalse(a))}} |
+      loc=pos kElif cond=exp kThen sTrue=scopeExpr kFi                    {fun (a) {assertVoid(a, If(cond(Val), sTrue(Void), Skip), loc)}}),
     whilep = memo $ eta syntax (
-      loc=pos kWhile cond=exp kDo body=exp kOd                      {fun (a) {assertVoid(a, While(cond(Val), body(Void)), loc)}}),
+      loc=pos kWhile cond=exp kDo body=scopeExpr kOd                      {fun (a) {assertVoid(a, While(cond(Val), body(Void)), loc)}}),
     dowhilep = memo $ eta syntax (
-      loc=pos kDo body=exp kWhile cond=exp kOd                      {fun (a) {assertVoid(a, DoWhile(body(Void), cond(Val)))}}),
+      loc=pos kDo body=scopeExpr kWhile cond=scopeExpr kOd                { fun (a) {assertVoid(a, distributeScope(body(Void), fun (body) {DoWhile(body, cond(Val))}), loc)}}),
     forp = memo $ eta syntax (
-      loc=pos kFor init=exp s[","] cond=exp s[","] iter=exp kDo body=exp kOd
-                                                                    {fun (a) {assertVoid(a, Seq(init(Void), While(cond(Val), Seq(body(Void), iter(Void)))), loc)}}),
+      loc=pos kFor init=scopeExpr s[","] cond=exp s[","] iter=exp kDo body=scopeExpr kOd
+        { fun (a) {assertVoid(a, distributeScope(init(Void), fun (init) {Seq(init, While(cond(Val), Seq(body(Void), iter(Void))))}), loc)}}),
     readp = memo $ eta syntax (
       loc=pos kRead s["("] x=lident s[")"]                          {fun (a) {assertVoid(a, Read(x), loc)}}),
     writep = memo $ eta syntax (
       loc=pos kWrite s["("] e=exp s[")"]                            {fun (a) {assertVoid(a, Write(e(Val)), loc)}}),
     skipp = memo $ eta syntax (
       loc=pos kSkip                                                 {fun (a) {assertVoid(a, Skip, loc)}}),
-    primary  = memo $ eta syntax (
+    scopep = memo $ eta syntax (
+              s=inbr[s("("), scopeExpr, s(")")]);  
+
+var primary  = memo $ eta syntax (
                                       -- decimal constant
                                       loc=pos x=decimal                                 {fun (a) {assertValue (a, Const (stringInt (x)), loc)}}     |
 
@@ -142,7 +145,7 @@ var ifp = memo $ eta syntax (
                                                                                                             esac
                                                                                                          }} |
 (* Assignment *)
-                                      inbr[s("("), exp, s(")")] | ifp | whilep | dowhilep | forp | readp | writep | skipp),
+                                      ifp | whilep | dowhilep | forp | readp | writep | skipp | scopep),
 (* End *)
       basic      = memo $ eta (expr ({[Right, {[s (":="),
                                                 fun (l, loc, r) {
