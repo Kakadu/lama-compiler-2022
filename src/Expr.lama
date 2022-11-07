@@ -11,16 +11,16 @@ import Builtins;
 
 -- As association map which maps "\otimes" into "\oplus"
 var ops = {
-  ["+" , infix + ],
-  ["-" , infix - ],
-  ["*" , infix * ],
-  ["/" , infix / ],
-  ["%" , infix % ],
+  ["+", infix +],
+  ["-", infix -],
+  ["*", infix *],
+  ["/", infix /],
+  ["%", infix %],
   ["==", infix ==],
   ["!=", infix !=],
-  ["<" , infix < ],
+  ["<", infix <],
   ["<=", infix <=],
-  [">" , infix > ],
+  [">", infix >],
   [">=", infix >=],
   ["&&", infix &&],
   ["!!", infix !!]
@@ -28,9 +28,9 @@ var ops = {
 
 -- The evaluator for infix operators: takes an operator as a string
 -- and two operand values, and returns the result
-public fun evalOp (op, l, r) {
-  case assoc (ops, op) of
-    Some (f) -> f (l, r)
+public fun evalOp(op, l, r) {
+  case assoc(ops, op) of
+    Some (f) -> f(l, r)
   esac
 }
 
@@ -61,56 +61,91 @@ public fun evalOp (op, l, r) {
 
 -- Helper function: checks that given name designates a regular variable in
 -- a given state
-fun lookupVal (state, name) {
-  case state.lookup (name) of
-    x@Val (_) -> x
-  | _         -> error (sprintf ("the name ""%s"" does not designate a variable", name), getLoc (name))
+fun lookupVal(state, name) {
+  case state.lookup(name) of
+      x@Val (_) -> x
+    | _         -> error(sprintf("the name ""%s"" does not designate a variable", name), getLoc(name))
   esac
 }
 
 -- Helper function: checks that given name designates a function in
 -- a given state
-fun lookupFun (state, name) {
-  case state.lookup (name) of
-    x@Fun (_, _) -> x
-  | _            -> error (sprintf ("the name ""%s"" does not designate a function", name), getLoc (name))
+fun lookupFun(state, name) {
+  case state.lookup(name) of
+      x@Fun (_, _) -> x
+    | _            -> error(sprintf("the name ""%s"" does not designate a function", name), getLoc(name))
   esac
 }
 
 -- Helper function: adds a bunch of regular variables current scope
-fun addNames (state, names) {
-  foldl (fun (s, name) {s.addName (name, Val (0))}, state, names)
+fun addNames(state, names) {
+  foldl(fun (s, name) { s.addName(name, Val(0)) }, state, names)
 }
 
 -- Helper function: adds a function in current scope
-fun addFunction (state, name, args, body) {
-  state.addName (name, Fun (args, body))
+fun addFunction(state, name, args, body) {
+  state.addName(name, Fun(args, body))
 }
-                                        
+
 -- Evaluates a list of expressions, properly threading a configurations.
 -- Returns the final configuration and the list of values
-fun evalList (c, exprs) {
-  case foldl (fun ([c, vals], e) {
-                case eval (c, e) of
-                  [c, v] -> [c, v : vals]
-                esac
-              },
-              [c, {}],
-              exprs) of
-    [c, vals] -> [c, reverse (vals)]
+fun evalList(c, exprs) {
+  case foldl(fun ([c, vals], e) {
+    case eval(c, e) of
+      [c, v] -> [c, v:vals]
+    esac
+  },
+    [c, { }],
+    exprs) of
+    [c, vals] -> [c, reverse(vals)]
   esac
 }
 
-fun eval (c@[s, w], expr) {
-  failure ("evalExpr not implemented\n")
+fun eval(c@[s, w], expr) {
+  case expr of
+      Assn(r, e)        -> case evalList(c, { r, e }) of [[s, w], { Ref(x), v }] -> lookupVal(s, x); [[s <- [x, Val(v)], w], v] | [c, { Ref(vs, i), v }] -> [c, vs[i] := v] esac
+    | Set(x, e)         -> case eval(c, e) of [[s, w], v] -> [[s <- [x, Val(v)], w], v] esac
+    | Seq(e1, e2)       -> case evalList(c, { e1, e2 }) of [c, { 0, v }] -> [c, v] esac
+    | Skip              -> [c, 0]
+    | If(e, b1, b2)     -> case eval(c, e) of [c, 0] -> eval(c, b2) | [c, #val] -> eval(c, b1) esac
+    | While(e, b)       -> case eval(c, e) of [c, 0] -> [c, 0] | [c, #val] -> case eval(c, b) of [c, 0] -> eval(c, expr) esac esac
+    | DoWhile(b, e)     -> case eval(c, b) of [c, 0] -> case eval(c, e) of [c, 0] -> [c, 0] | [c, #val] -> eval(c, expr) esac esac
+    | Var(x)            -> [c, case lookupVal(s, x) of Val(v) -> v esac]
+    | Ref(x)            -> lookupVal(s, x); [c, Ref(x)]
+    | Const(n)          -> [c, n]
+    | Binop(op, e1, e2) -> case evalList(c, { e1, e2 }) of [c, { l, r }] -> [c, evalOp(op, l, r)] esac
+    | Call(f, as)       ->
+      case lookupFun(s, f) of
+          Fun(ns, External) -> eval(c, Builtin(f, as))
+        | Fun(ns, b)        ->
+          if size(ns) != size(as) then error(sprintf("unexpected amount of arguments for %s", f), getLoc(f)) fi;
+          case evalList(c, as) of
+            [[s, w], vs] ->
+              case eval([foldl(fun (s, [n, v]) { addName(s, n, Val(v)) }, enterFunction(s), zip(ns, vs)), w], b) of
+                [[s_, w], v] -> [[leaveFunction(s, getGlobal(s_)), w], v]
+              esac
+          esac
+      esac
+    | Scope (ds, e)     ->
+      case eval([foldl(fun (s, d) { case d of Var(ns) -> addNames(s, ns) | Fun(n, as, b) -> addFunction(s, n, as, b) esac }, enterScope(s), ds), w], e) of
+        [[s, w], v] -> [[leaveScope(s), w], v]
+      esac
+    | Ignore(e)         -> case eval(c, e) of [c, _] -> [c, 0] esac
+    | String(x)         -> [c, x]
+    | Array(es)         -> case evalList(c, es) of [c, vs] -> [c, listArray(vs)] esac
+    | Sexp(x, es)       -> case evalList(c, es) of [c, vs] -> [c, Sexp(x, listArray(vs))] esac
+    | Elem(e, i)        -> case evalList(c, { e, i }) of [c, { e, i }] -> [c, (case e of Sexp(_, vs) -> vs | vs@#array -> vs | vs@#str -> vs esac)[i]] esac
+    | ElemRef(e, i)     -> case evalList(c, { e, i }) of [c, { e, i }] -> [c, Ref(case e of Sexp(_, vs) -> vs | vs@#array -> vs | vs@#str -> vs esac, i)] esac
+    | Builtin(f, as)    -> case evalList(c, as) of [[s, w], vs] -> case evalBuiltin(f, vs, w) of [v, w] -> [[s, w], v] esac esac
+  esac
 }
 
 
 -- Evaluates a program with a given input and returns an output
-public fun evalExpr (input, expr) {
-  case eval ([emptyState ().enterScope.addName ("read",   Fun ({}, External))
-                                      .addName ("write",  Fun ({"a"}, External))
-                                      .addName ("length", Fun ({"a"}, External)), createWorld (input)], expr) of
+public fun evalExpr(input, expr) {
+  case eval([emptyState().enterScope.addName("read", Fun({ }, External))
+    .addName("write", Fun({ "a" }, External))
+    .addName("length", Fun({ "a" }, External)), createWorld(input)], expr) of
     [c, _] -> c.snd.getOutput
   esac
 }
