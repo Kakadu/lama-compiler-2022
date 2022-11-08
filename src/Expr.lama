@@ -101,7 +101,8 @@ fun eval (c@[st, w], expr) {
                                  esac
     | Seq (stmt1, stmt2)      -> eval (eval ([st, w], stmt1).fst, stmt2)
     | Skip                    -> [[st, w], 0]
-    | Read (x)                -> case readWorld (w) of 
+    | Read (x)                -> checkVar (st, x);
+                                 case readWorld (w) of 
                                    [new_x, new_w] -> [[st <- [x, Var (new_x)], new_w], 0]
                                  esac
     | Write (e)               -> case eval (c, e) of
@@ -121,8 +122,8 @@ fun eval (c@[st, w], expr) {
                                              | [c, _] -> eval (c, expr)
                                              esac
                                  esac
-    | Var (x)                 -> [c, case lookup (st, x) of Var (x) -> x esac]
-    | Ref (x)                 -> [c, Ref (x)]
+    | Var (x)                 -> checkVar (st, x); [c, case lookup (st, x) of Var (x) -> x esac]
+    | Ref (x)                 -> checkVar (st, x); [c, Ref (x)]
     | Const (n)               -> [c, n]
     | Binop (op, l, r)        -> case evalList (c, {l, r}) of
                                    [c, {x, y}] -> [c, evalOp (op, x, y)]
@@ -141,7 +142,7 @@ fun eval (c@[st, w], expr) {
                                    [[st, w], vs] -> [[st.leaveScope, w], vs]
                                  esac
     | Call (f, args)          -> checkFun (st, f);
-                                 case s.lookup (f) of
+                                 case st.lookup (f) of
                                   Fun (fargs, body) ->
                                     if fargs.size != args.size
                                       then error (sprintf ("Mismatch in number of parameters in function ""%s"" call", f), getLoc (f))

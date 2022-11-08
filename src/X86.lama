@@ -491,6 +491,37 @@ fun compileBinop(op, x, y) {
   esac
 }
 
+-- Generates a static call
+fun call (env, fLabel, nA) {
+  case foldl(fun ([pushs, pops], r) { [pushs <+ Push (r), singletonBuffer (Pop (r)) <+> pops] }, 
+              [{}, {}], liveRegisters (env, nA)
+       ) of
+    [pushRegs, popRegs] ->
+      fun pushArgs (env, acc, n) {
+        case n of
+          0 -> [env, acc]
+        | n -> case env.pop of
+                [x, env] -> pushArgs (env, acc <+ Push (x), n - 1)
+              esac
+        esac
+      }
+
+      case pushArgs (env, emptyBuffer (), nA) of
+        [env, pushArgs] ->
+          case env.allocate of
+            [y, env] ->
+              [env, pushRegs <+>
+                    pushArgs <+
+                    Call (fLabel) <+
+                    Binop ("+", L (wordSize * nA), esp) <+>
+                    popRegs <+
+                    Mov (eax, y)
+              ]
+          esac
+      esac
+  esac
+}
+
 -- Compiles stack machine code into a list of x86 instructions. Takes an environment
 -- and stack machine code, returns an updated environment and x86 code.
 fun compile (env, code) {
@@ -508,17 +539,14 @@ fun compile (env, code) {
 	      [s, env] -> [env, code <+ Push (edx) <+ Push (ecx) <+ Push (s) <+ Call ("Lwrite") <+ Pop (eax) <+ Pop (ecx) <+ Pop (edx)]
             esac
         | LD (x) ->
-            case env.addGlobal (x).allocate of
+            case env.allocate of
               [s, env] -> [env, code <+> move (env.loc (x), s)]
             esac
         | LDA (x) ->
-            case env.addGlobal (x).allocate of
+            case env.allocate of
               [s, env] -> [env, code <+ Lea (env.loc (x), eax) <+> move (eax, s)]
             esac
-        | ST (x)      ->
-            case env.addGlobal (x).pop of
-              [s, env] -> [env, code <+> move (s, env.loc (x))]
-            esac
+        | ST (x) -> [env, code <+> move (env.peek, env.loc (x))]
         | CONST (n) ->
             case env.allocate of
               [s, env] -> [env, code <+ Mov (L (n), s)]
@@ -535,9 +563,9 @@ fun compile (env, code) {
         | JMP (l) ->
             [setBarrier (setStack (env, l)), code <+ Jmp (l)]
         | CJMP (s, l) ->
-          case env.pop of
-            [x, env] -> [setStack (env, l), code <+ Binop("cmp", L (0), x) <+ CJmp (s, l)]
-          esac
+            case env.pop of
+              [x, env] -> [setStack (env, l), code <+ Binop("cmp", L (0), x) <+ CJmp (s, l)]
+            esac
         | STI  -> case env.pop2 of
                     [v, x, env] ->
                       [env.push (x), code <+> if memOpnd (x)
@@ -551,6 +579,16 @@ fun compile (env, code) {
                       ]
                   esac
         | DROP -> case env.pop of [_, env] -> [env, code] esac
+        | BEGIN (f, nA, nL) -> [env.enterFunction (f, nL), code <+> prologue (f)]
+        | END ->
+            case epilogue (env) of
+              [env, endCode] -> [env, code <+> endCode]
+            esac
+        | GLOBAL (x) -> [env.addGlobal (x), code]
+        | CALL (fLabel, nA) ->
+            case call (env, fLabel, nA) of
+              [env, callCode] -> [env, code <+> callCode]
+            esac
         | _ -> failure ("codegeneration for instruction %s is not yet implemented\n", i.string)
         esac
       }, [env, emptyBuffer ()], code)
