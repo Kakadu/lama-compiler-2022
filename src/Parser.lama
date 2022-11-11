@@ -119,9 +119,17 @@ var primary    = memo $ eta syntax (
                                                                                                                       esac
                                                                                                             | Some (args) -> assertValue (a, Call (x, args))
                                                                                                             esac
-                                                                                                         }} |
+                                                                                                         }}
 (* Assignment *)
-                                      $(failure ("the rest of primary parsing in not implemented\n"))),
+                                     | loc=pos kSkip { fun(a) { assertVoid (a, Skip, loc) } }
+                                     | loc=pos kRead x=inbr[s("("), lident, s(")")] { fun(a) { assertVoid (a, Read (x), loc) } }
+                                     | loc=pos kWrite e=inbr[s("("), exp, s(")")] { fun(a) { assertVoid (a, Write (e (Val)), loc) } }
+                                     | loc=pos kIf cond=exp kThen s1=scopeExpr s2=elseTail { fun(a) { If (cond (Val), s1 (a) , s2 (a)) } }
+                                     | loc=pos kWhile cond=exp kDo body=scopeExpr kOd { fun(a) { assertVoid (a, While (cond (Val), body (Void)), loc) } }
+                                     | loc=pos kDo body=scopeExpr kWhile cond=exp kOd { fun(a) { distributeScope(body (Void), fun (body) { assertVoid (a, DoWhile (body, cond (Val)), loc) }) } }
+                                     | loc=pos kFor s1=scopeExpr s[","] cond=exp s[","] s2=exp kDo s3=scopeExpr kOd { fun(a) { distributeScope(s1(Void), fun (s1) { assertVoid(a, Seq (s1, While (cond (Val), Seq (s3 (Void), s2 (Void)))), loc) }) } }
+                                     | -s["("] scopeExpr -s[")"]
+                                     ),
 (* End *)
       basic      = memo $ eta (expr ({[Right, {[s (":="),
                                                 fun (l, loc, r) {
@@ -151,7 +159,8 @@ var primary    = memo $ eta syntax (
                                            Fun (name, args, body (Weak))
                                       }
                                      ),                                    
-      exp        = memo $ eta syntax (basic | s1=basic s[";"] s2=exp {fun (a) {Seq (s1 (Void), s2 (a))}});
+      exp        = memo $ eta syntax (basic | s1=basic s[";"] s2=exp {fun (a) {Seq (s1 (Void), s2 (a))}}),
+      elseTail = memo $ eta syntax ( kFi { fun(a) { assertVoid (a, Skip, loc) } } | -kElse scopeExpr -kFi | kElif cond=exp kThen s1=scopeExpr s2=elseTail { fun(a) { If (cond (Val), s1 (a), s2 (a)) } } );
 
 -- Public top-level parser
 public parse = syntax (s=scopeExpr {s (Void)});

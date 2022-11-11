@@ -96,7 +96,98 @@ fun evalList (c, exprs) {
 
 (* Assignment *)
 fun eval (c@[s, w], expr) {
-  failure ("evalExpr not implemented\n")
+  case expr of
+    Const (n)        -> [c, Var (n)]
+  | Var (x)          -> checkVar(s, x); [c, lookup (s, x)]
+  | Ref (x)          -> checkVar(s, x); [c, Ref (x)]
+  | Scope (ds, e)    -> (
+    var newScope = foldl(fun (s, def) {
+        case def of
+          Var (x)                -> addNames (s, x)
+        | Fun (name, args, body) -> addFunction (s, name, args, body)
+        esac
+    }, enterScope(s), ds);
+    var result = eval([newScope, w], e);
+    case result of
+        [[newScope, w], v] -> [[leaveScope(newScope), w], v]
+    esac
+  )
+  | Call (name, args) -> (
+    checkFun(s, name);
+    case lookup(s, name) of
+      Fun (funArgs, body) -> (
+        if funArgs.size != args.size
+        then error (sprintf ("the function ""%s"" was called with ""%d"" parameters, expected ""%d""", name, funArgs.size, args.size), getLoc (name))
+        fi;
+        case evalList(c, args) of
+          [[s, w], evaluatedArgs] -> (
+            var fState = foldl(fun (s, [x, v]) { addName(s, x, v) }, enterFunction(s), zip (funArgs, evaluatedArgs));
+            case eval ([fState, w], body) of
+              [[fState, w], v] -> [[leaveFunction(s, getGlobal(fState)), w], v]
+            esac
+          )
+        esac
+      )
+    esac
+  )
+  | Ignore (e)       -> case eval(c, e) of [c, _] -> [c, None] esac
+  | Binop (op, l, r) -> (
+        case eval (c, l) of
+            [c, Var (lvalue)] -> case eval (c, r) of
+                  [c, Var (rvalue)] -> [c, Var (evalOp (op, lvalue, rvalue))]
+                | _ -> failure ("Should not reach")
+            esac
+            | _ -> failure ("Should not reach")
+        esac
+    )
+  | Skip             -> [c, None]
+  | Assn (l, r)      -> (
+        case eval (c, l) of
+            [c, Ref (x)] -> case eval (c, r) of
+                  [[s, w], v] -> [[s <- [x, v], w], v]
+                | _ -> failure ("Should not reach")
+            esac
+            | _ -> failure ("Should not reach")
+        esac
+    )
+  | Read (x)         -> (
+        case readWorld(w) of
+            [v, newWorld] -> [[s <- [x, Var (v)], newWorld], None]
+        esac
+    )
+  | Write (e)        -> (
+        case eval (c, e) of
+            [[s, w], Var (v)] -> [[s, writeWorld (v, w)], None]
+            | _ -> failure ("Should not reach")
+        esac
+    )
+  | Seq (e1, e2)     -> (
+        case eval (c, e1) of
+            [c, _] -> eval (c, e2)
+        esac
+    )
+  | If (cond, thenB, elseB) -> (
+        case eval (c, cond) of
+              [c, Var (v)] -> if v then eval (c, thenB) else eval (c, elseB) fi
+            | _ -> failure ("Should not reach")
+        esac
+    )
+  | While (cond, body)      -> (
+        case eval (c, cond) of
+              [c, Var (v)] ->
+              if v
+              then case eval (c, body) of [c, _] -> eval (c, expr) esac
+              else [c, None]
+              fi
+            | _ -> failure ("Should not reach")
+        esac
+    )
+  | DoWhile (body, cond)    -> (
+        case eval (c, body) of
+            [c, _] -> eval (c, While (cond, body))
+        esac
+  )
+  esac
 }
 (* End *)
 
