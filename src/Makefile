@@ -13,7 +13,7 @@ Parser.o: Lexer.o
 
 State.o: Lexer.o Parser.o
 
-Expr.o: State.o
+Expr.o: State.o 
 
 SM.o: State.o World.o Expr.o Parser.o Lexer.o
 
@@ -27,3 +27,4 @@ variate:
 
 clean:
 	rm -Rf *.s *.o *.i *~ *.html *.sm lama-impl
+

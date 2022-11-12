@@ -10,7 +10,7 @@ jobs:
     steps:
       - name: Check Deadline
         run: |
-          deadline=2022-11-04T23:59
+          deadline=2022-11-13T23:59
           if [[ $(date +'%Y-%m-%d') > $deadline ]];
           then
               echo "FIASCO: The deadline has expired"
@@ -51,7 +51,6 @@ jobs:
           else
             echo ${branch:1:2} > assignment_number.txt
           fi
-
       - uses: actions/upload-artifact@v2
         with:
           name: share_info
