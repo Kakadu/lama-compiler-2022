@@ -94,8 +94,7 @@ fun evalList (c, exprs) {
   esac
 }
 
-(* Assignment *)
-fun eval (c@[s, w], expr) { (* TODO *)
+fun eval (c@[s, w], expr) {
   case expr of
     Assn (l, r) ->
         case evalList (c, { l, r }) of
@@ -137,9 +136,30 @@ fun eval (c@[s, w], expr) { (* TODO *)
       case eval (c, e) of
         [c, _] -> [c, Void]
       esac
+    | Scope (defs, e) ->
+      case eval ([foldl (fun (s, def) { case def of
+        Var (names) -> s.addNames (names)
+        | Fun (name, params, body) -> s.addFunction (name, params, body)
+      esac
+      }, s.enterScope, defs), w], e) of
+        [[s, w], v] -> [[s.leaveScope, w], v]
+      esac
+    | Call (f, args) ->
+      s.checkFun (f);
+      case s.lookup (f) of
+        Fun (params, body) ->
+          if args.size != params.size then
+            error (sprintf ("expected %d arguments for function ""%s"", but found %d", params.size, f, args.size), getLoc (f))
+          fi;
+          case evalList (c, args) of
+            [[s, w], args] ->
+              case eval ([foldl (fun (s, [param, arg]) { s.addName (param, Var (arg)) }, s.enterFunction, zip (params, args)), w], body) of
+                [[s2, w], v] -> [[s.leaveFunction (s2.getGlobal), w], v]
+              esac
+          esac
+      esac
   esac
 }
-(* End *)
 
 -- Evaluates a program with a given input and returns an output
 public fun evalExpr (input, expr) {

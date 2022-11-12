@@ -480,7 +480,6 @@ fun compile (env, code) {
             case env.pop of
               [_, env] -> [env, code]
             esac
-          (* Assignment *) (* TODO *)
 
           -- Some guidelines for generating function calls:
           --
@@ -491,15 +490,46 @@ fun compile (env, code) {
           -- 3. generate the call itself;
           -- 4. discard the actual parameters from the stack;
           -- 5. restore saved live registers.
-          --
+
+        | CALL (f, nArgs) ->
+            var liveRegs = liveRegisters (env, nArgs);
+            var pushLiveRegs = listBuffer (map (fun (reg) { Push (reg) }, liveRegs));
+            var popLiveRegs = listBuffer (reverse (map (fun (reg) { Pop (reg) }, liveRegs)));
+            fun pushArgs (env, n) {
+              fun helper (env, n, prefix) {
+                if n == 0 then [env, prefix]
+                  else case pop (env) of
+                    [s, env] -> helper (env, n - 1, prefix <+ Push (s))
+                  esac
+                fi
+              }
+              helper (env, n, emptyBuffer ())
+            }
+            case pushArgs (env, nArgs) of
+              [env, pushArgs] ->
+                case allocate (env) of
+                  [s, env] -> [env,
+                    code
+                      <+> pushLiveRegs
+                      <+> pushArgs
+                      <+ Call (f)
+                      <+ Binop ("+", L (nArgs * wordSize), esp)
+                      <+> popLiveRegs
+                      <+> move (eax, s)
+                  ]
+                esac
+            esac
           -- Some guidelines for generating functions:
           --
           -- 1. generate proper prologue for BEGIN instruction (use "prologue" helper); use
           --    env.enterFunction to create a proper environment;
           -- 2. generate epilogue for END instruction.
-
-          | _ -> failure ("codegeneration for instruction %s is not yet implemented\n", i.string)
-          (* End *)
+        | BEGIN (f, nParams, nLocals) -> [enterFunction (env, f, nLocals), code <+> prologue (f)]
+        | END ->
+            case epilogue (env)
+            of [env, epilogueCode] -> [env, code <+> epilogueCode]
+            esac
+        | GLOBAL (x) -> [addGlobal (env, x), code]
         | _ -> failure ("codegeneration for instruction %s is not implemented\n", i.string)
         esac
       }, [env, emptyBuffer ()], code)
