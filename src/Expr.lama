@@ -37,7 +37,7 @@ public fun evalOp (op, l, r) {
 --
 -- A expression is represented by a data structure of the following shape:
 --
--- expr = Assn    (expr, expr)         |
+-- expr = Assn    (string, expr)       |
 --        Seq     (expr, expr)         |
 --        Skip                         |
 --        Read    (string)             |
@@ -84,12 +84,12 @@ fun addFunction (state, name, args, body) {
 -- Returns the final configuration and the list of values
 fun evalList (c, exprs) {
   case foldl (fun ([c, vals], e) {
-                case eval (c, e) of
-                  [c, v] -> [c, v : vals]
-                esac
-              },
-              [c, {}],
-              exprs) of
+    case eval (c, e) of
+      [c, v] -> [c, v : vals]
+    esac
+  },
+    [c, {}],
+    exprs) of
     [c, vals] -> [c, reverse (vals)]
   esac
 }
@@ -97,36 +97,39 @@ fun evalList (c, exprs) {
 fun eval (c@[s, w], expr) {
   case expr of
     Assn (l, r) ->
-        case evalList (c, { l, r }) of
-          [[s, w], { Ref (x), v }] -> [[s <- [x, v], w], v]
-        esac
-    | Seq (st1, st2) ->
-      case evalList (c, { st1, st2 }) of
+      case evalList (c, { l, r }) of
+        [[s, w], { Ref (x), v }] ->
+          s.checkVar (x);
+          [[s <- [x, Var (v)], w], v]
+      esac
+    | Seq (s1, s2) ->
+      case evalList (c, { s1, s2 }) of
         [c, { _, v }] -> [c, v]
       esac
-    | Skip -> [c, Void]
+    | Skip -> [c, 0]
     | Read (x) ->
+      s.checkVar (x);
       case readWorld (w) of
-        [v, w] -> [[s <- [x, v], w], Void]
+        [v, w] -> [[s <- [x, Var (v)], w], 0]
       esac
     | Write (e) ->
       case eval (c, e) of
-        [[s, w], v] -> [[s, writeWorld (v, w)], Void]
+        [[s, w], v] -> [[s, writeWorld (v, w)], 0]
       esac
-    | If (e, st1, st2) ->
+    | If (e, s1, s2) ->
       case eval (c, e) of
-        [c, cond] -> eval (c, if cond then st1 else st2 fi)
+        [c, cond] -> eval (c, if cond then s1 else s2 fi)
       esac
     | While (e, s) ->
       case eval (c, e)of
-        [c, cond] -> if cond then case eval (c, s) of [c, Void] -> eval (c, expr) esac else [c, Void] fi
+        [c, cond] -> if cond then case eval (c, s) of [c, 0] -> eval (c, expr) esac else [c, 0] fi
       esac
     | DoWhile (s, e) ->
       case eval (c, s) of
-        [c, Void] -> eval (c, While (e, s))
+        [c, 0] -> eval (c, While (e, s))
       esac
-    | Var (x) -> [c, s (x)]
-    | Ref (x) -> [c, Ref (x)]
+    | Var (x) -> s.checkVar (x); [c, case s.lookup (x) of Var(v) -> v esac]
+    | Ref (x) -> s.checkVar (x); [c, Ref (x)]
     | Const (n) -> [c, n]
     | Binop (op, l, r) ->
       case evalList (c, { l, r }) of
@@ -134,7 +137,7 @@ fun eval (c@[s, w], expr) {
       esac
     | Ignore (e) ->
       case eval (c, e) of
-        [c, _] -> [c, Void]
+        [c, _] -> [c, 0]
       esac
     | Scope (defs, e) ->
       case eval ([foldl (fun (s, def) { case def of
@@ -163,7 +166,7 @@ fun eval (c@[s, w], expr) {
 
 -- Evaluates a program with a given input and returns an output
 public fun evalExpr (input, expr) {
-  case eval ([emptyState, createWorld (input)], expr) of
+  case eval ([emptyState (), createWorld (input)], expr) of
     [c, _] -> c.snd.getOutput
   esac
 }
