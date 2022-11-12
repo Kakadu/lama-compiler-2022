@@ -510,7 +510,7 @@ public fun compileSM (stmt) {
               [callLab, env] -> (
                 var compiledArgs = compile (callLab, env, foldl (fun (seq, a) { Seq (seq, a) }, Skip, args));
                 case compiledArgs of
-                  [callLabUsed, env, code] -> [false, env, code <+> label (callLab, callLabUsed) <+ CALL (fLabel, nargs)]
+                  [callLabUsed, env, code] -> [false, env, code <+> label (callLab, callLabUsed) <+ CALL (fLabel, nargs)] -- FIXME maybe in this place we must drop args emitted to stack, check in next tests
                 esac
               )
             esac
