@@ -1,14 +1,14 @@
 -- X86 codegeneration interface
 -- We use stack machine programs as intermediate representation
+import Fun;
 import SM;
 import Collection;
 import List;
-import Buffer;
-import Fun;
 import Manifest;
+import Buffer;
 
 -- Assembler language interface
--- The registers: 
+-- The registers:
 var regs = ["%ebx", "%ecx", "%esi", "%edi", "%eax", "%edx", "%ebp", "%esp"];
 
 -- We can not freely operate with all register; only with 4 by now
@@ -59,12 +59,12 @@ fun insnString (insn) {
   fun binopString (op) {
     case op of
       "+"   -> "addl"
-    | "-"   -> "subl"
-    | "*"   -> "imull"
-    | "&&"  -> "andl"
-    | "!!"  -> "orl"
-    | "^"   -> "xorl"
-    | "cmp" -> "cmpl"
+      | "-"   -> "subl"
+      | "*"   -> "imull"
+      | "&&"  -> "andl"
+      | "!!"  -> "orl"
+      | "^"   -> "xorl"
+      | "cmp" -> "cmpl"
     esac
   }
 
@@ -85,19 +85,19 @@ fun insnString (insn) {
 
   case insn of
     Cltd               -> "\tcltd\n"
-  | Set   (suf, s)     -> sprintf ("\tset%s\t%s\n", suf, s)
-  | IDiv  (s1)         -> sprintf ("\tidivl\t%s\n", opndString (s1))
-  | Binop (op, s1, s2) -> sprintf ("\t%s\t%s,\t%s\n", binopString (op), opndString (s1), opndString (s2))
-  | Lea   (s1, s2)     -> sprintf ("\tleal\t%s,\t%s\n", opndString (s1), opndString (s2))
-  | Mov   (s1, s2)     -> sprintf ("\tmovl\t%s,\t%s\n", opndString (s1), opndString (s2))
-  | Push  (s)          -> sprintf ("\tpushl\t%s\n", opndString (s))
-  | Pop   (s)          -> sprintf ("\tpopl\t%s\n", opndString (s))
-  | Ret                -> "\tret\n"
-  | Call  (p)          -> sprintf ("\tcall\t%s\n", p)
-  | Label (l)          -> sprintf ("%s:\n", l)
-  | Jmp   (l)          -> sprintf ("\tjmp\t%s\n", l)
-  | CJmp  (c, l)       -> sprintf ("\tj%s\t%s\n", c, l)
-  | Meta  (m)          -> m
+    | Set   (suf, s)     -> sprintf ("\tset%s\t%s\n", suf, s)
+    | IDiv  (s1)         -> sprintf ("\tidivl\t%s\n", opndString (s1))
+    | Binop (op, s1, s2) -> sprintf ("\t%s\t%s,\t%s\n", binopString (op), opndString (s1), opndString (s2))
+    | Lea   (s1, s2)     -> sprintf ("\tleal\t%s,\t%s\n", opndString (s1), opndString (s2))
+    | Mov   (s1, s2)     -> sprintf ("\tmovl\t%s,\t%s\n", opndString (s1), opndString (s2))
+    | Push  (s)          -> sprintf ("\tpushl\t%s\n", opndString (s))
+    | Pop   (s)          -> sprintf ("\tpopl\t%s\n", opndString (s))
+    | Ret                -> "\tret\n"
+    | Call  (p)          -> sprintf ("\tcall\t%s\n", p)
+    | Label (l)          -> sprintf ("%s:\n", l)
+    | Jmp   (l)          -> sprintf ("\tjmp\t%s\n", l)
+    | CJmp  (c, l)       -> sprintf ("\tj%s\t%s\n", c, l)
+    | Meta  (m)          -> m
   esac
 }
 
@@ -416,20 +416,33 @@ fun compile (env, code) {
         var code = scode <+ Meta ("# " ++ showSMInsn (i) ++ "\n");
         case i of
           READ ->
-            case env.allocate of
-              [s, env] -> [env, code <+ Call ("Lread") <+ Mov (eax, s)]
+            case allocate (env) of
+              [s, env] -> [env, code <+ Push (edx) <+ Push (ecx) <+ Call ("Lread") <+ Pop (ecx) <+ Pop (edx) <+ Mov (eax, s)]
             esac
-        | WRITE ->
-            case env.pop of
-              [s, env] -> [env, code <+ Push (s) <+ Call ("Lwrite") <+ Pop (eax)]
+          | WRITE ->
+            case pop (env) of
+              [s, env] -> [env, code <+ Push (edx) <+ Push (ecx) <+ Push (s) <+ Call ("Lwrite") <+ Pop (eax) <+ Pop (ecx) <+ Pop (edx)]
             esac
-        | CONST (n) ->
-            case env.allocate of
+          | CONST (n) ->
+            case allocate (env) of
               [s, env] -> [env, code <+> move (L (n), s)]
             esac
-        | BINOP (op) ->
-            case env.pop2 of
-              [y, x, env] -> [env.push (x), code <+>
+          | LD (x) ->
+            case allocate (env) of
+              [s, env] -> [env, code <+> move (loc (env, x), s)]
+            esac
+          | LDA (x) ->
+            case allocate (env) of
+              [s, env] -> [env, code <+ if memOpnd (s) then Lea (loc (env, x), eax) <+> move (eax, s) else Lea (loc (env, x), s) fi]
+            esac
+          | ST (x) -> [env, code <+> move (peek (env), loc (env, x))]
+          | STI ->
+            case pop2 (env) of
+              [v, x, env] -> [push (env, v), code <+> move (v, I (0, x))]
+            esac
+          | BINOP (op) ->
+            case pop2 (env) of
+              [y, x, env] -> [push (env, x), code <+>
                 if compare (op, "+") == 0 !! compare (op, "-") == 0 !! compare (op, "*") == 0 then
                   if memOpnd (x) == false then singletonBuffer (Binop (op, y, x))
                     elif memOpnd (y) == false && compare (op, "-") != 0 then Binop (op, x, y) <+> move (y, x)
@@ -454,33 +467,16 @@ fun compile (env, code) {
                 fi
               ]
             esac
-        | LD (x) ->
-            case env.addGlobal (x).allocate of
-              [s, env] -> [env, code <+> move (env.loc (x), s)]
+          | LABEL (l) -> [if isBarrier (env) then retrieveStack (env, l) else env fi, code <+ Label (l)]
+          | JMP(l) -> [setBarrier (setStack (env, l)), code <+ Jmp (l)]
+          | CJMP (c, l) ->
+            case pop (env) of
+              [s, env] -> [setStack (env, l), code <+> if memOpnd (s) then move (s, eax) <+ Binop ("&&", eax, eax) else singletonBuffer (Binop ("&&", s, s)) fi <+ CJmp (c, l)]
             esac
-        | LDA (x) ->
-            case env.addGlobal (x).allocate of
-              [s, env] -> [env, code <+ if memOpnd (s) then Lea (env.loc (x), eax) <+> move (eax, s) else Lea (env.loc (x), s) fi]
-            esac
-        | ST (x) ->
-            case env.addGlobal (x) of
-              env -> [env, code <+> move (env.peek, env.loc (x))]
-            esac
-        | STI ->
-            case env.pop2 of
-              [v, x, env] -> [env.push (v), code <+> move (v, I (0, x))]
-            esac
-        | LABEL (l) -> [if env.isBarrier then env.retrieveStack (l) else env fi, code <+ Label (l)]
-        | JMP(l) -> [env.setStack (l).setBarrier, code <+ Jmp (l)]
-        | CJMP (c, l) ->
-            case env.pop of
-              [s, env] -> [env.setStack (l), code <+> if memOpnd (s) then move (s, eax) <+ Binop ("&&", eax, eax) else singletonBuffer (Binop ("&&", s, s)) fi <+ CJmp (c, l)]
-            esac
-        | DROP ->
-            case env.pop of
+          | DROP ->
+            case pop (env) of
               [_, env] -> [env, code]
             esac
-
           -- Some guidelines for generating function calls:
           --
           -- 1. generate instructions to save live registers on the X86 stack (use
@@ -490,8 +486,7 @@ fun compile (env, code) {
           -- 3. generate the call itself;
           -- 4. discard the actual parameters from the stack;
           -- 5. restore saved live registers.
-
-        | CALL (f, nArgs) ->
+          | CALL (f, nArgs) ->
             var liveRegs = liveRegisters (env, nArgs);
             var pushLiveRegs = listBuffer (map (fun (reg) { Push (reg) }, liveRegs));
             var popLiveRegs = listBuffer (reverse (map (fun (reg) { Pop (reg) }, liveRegs)));
@@ -524,13 +519,12 @@ fun compile (env, code) {
           -- 1. generate proper prologue for BEGIN instruction (use "prologue" helper); use
           --    env.enterFunction to create a proper environment;
           -- 2. generate epilogue for END instruction.
-        | BEGIN (f, nParams, nLocals) -> [enterFunction (env, f, nLocals), code <+> prologue (f)]
-        | END ->
+          | BEGIN (f, nParams, nLocals) -> [enterFunction (env, f, nLocals), code <+> prologue (f)]
+          | END ->
             case epilogue (env)
             of [env, epilogueCode] -> [env, code <+> epilogueCode]
             esac
-        | GLOBAL (x) -> [addGlobal (env, x), code]
-        | _ -> failure ("codegeneration for instruction %s is not implemented\n", i.string)
+          | GLOBAL (x) -> [addGlobal (env, x), code]
         esac
       }, [env, emptyBuffer ()], code)
   }

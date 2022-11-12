@@ -25,8 +25,8 @@ public fun error (msg, loc) {
 fun assertValue (atr, v, loc) {
   case atr of
     Ref  -> error ("reference expected", loc)
-  | Void -> Ignore (v)
-  | _    -> v
+    | Void -> Ignore (v)
+    | _    -> v
   esac
 }
 
@@ -35,9 +35,9 @@ fun assertValue (atr, v, loc) {
 fun assertVoid (atr, v, loc) {
   case atr of
     Void -> v
-  | Val  -> error ("value expected", loc)
-  | _    -> error ("reference expected", loc)
-  | Weak -> Seq (v, Const (0))
+    | Val  -> error ("value expected", loc)
+    | Weak -> Seq (v, Const (0))
+    | _    -> error ("reference expected", loc)
   esac
 }
 
@@ -50,10 +50,10 @@ fun inbr (l, p, r) {
 -- A helper function to be used with super-combinator "expr"
 fun binop (op) {
   [syntax (pos -s[op]), fun (l, loc, r) {
-                          fun (a) {
-                            assertValue (a, Binop (op, l (Val), r (Val)), loc)
-                          }
-                        }
+    fun (a) {
+      assertValue (a, Binop (op, l (Val), r (Val)), loc)
+    }
+  }
   ]
 }
 
