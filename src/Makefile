@@ -11,9 +11,11 @@ all: Parser.o Lexer.o X86.o SM.o Manifest.o
 
 Parser.o: Lexer.o
 
-Expr.o: State.o 
+State.o: Lexer.o Parser.o
 
-SM.o: State.o World.o Expr.o
+Expr.o: State.o
+
+SM.o: State.o World.o Expr.o Parser.o Lexer.o
 
 X86.o: SM.o Manifest.o
 
@@ -25,4 +27,3 @@ variate:
 
 clean:
 	rm -Rf *.s *.o *.i *~ *.html *.sm lama-impl
-
