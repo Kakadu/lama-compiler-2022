@@ -94,11 +94,79 @@ fun evalList (c, exprs) {
   esac
 }
 
-(* Assignment *)
 fun eval (c@[s, w], expr) {
-  failure ("evalExpr not implemented\n")
+  case expr of
+    Assn (x, e) -> 
+      case evalList (c, {x, e}) of
+        [[s, w], { Ref (x), v }] -> [[s <- [x, Var (v)], w], v]
+      esac
+  | Seq (stmt1, stmt2) -> eval (eval ([s, w], stmt1).fst, stmt2)
+  | Skip -> [[s, w], 0]
+  | Read (x) -> 
+      checkVar (s, x);
+      case readWorld (w) of 
+        [new_x, new_w] -> [[s <- [x, Var (new_x)], new_w], 0]
+      esac
+  | Write (e) -> 
+      case eval (c, e) of
+        [[s, w], v] -> [[s, writeWorld (v, w)], 0]
+      esac
+  | If (cond, stmt1, stmt2) -> 
+      case eval (c, cond) of
+        [c, 0] -> eval (c, stmt2)
+      | [c, _] -> eval (c, stmt1)
+      esac
+  | While (cond, body) -> 
+      case eval (c, cond) of
+        x@[c, 0] -> x
+      | [c, _]   -> eval (eval (c, body).fst, expr) 
+      esac
+  | DoWhile (body, cond) -> 
+    case eval (c, body) of [c, _] -> 
+      case eval (c, cond) of
+        [c, 0] -> [c, 0]
+        | [c, _] -> eval (c, expr)
+      esac
+    esac
+  | Var (x) -> checkVar (s, x); [c, case lookup (s, x) of Var (x) -> x esac]
+  | Ref (x) -> checkVar (s, x); [c, Ref (x)]
+  | Const (n) -> [c, n]
+  | Binop (op, l, r) -> 
+      case evalList (c, {l, r}) of
+        [c, {x, y}] -> [c, evalOp (op, x, y)]
+      esac
+  | Ignore (e) -> 
+      case eval (c, e) of
+        [c, _] -> [c, 0]
+      esac
+  | Scope (defs, e) -> 
+      case eval ([foldl (fun (s, def) { case def of
+        Var (names) -> s.addNames (names)
+      | Fun (name, params, body) -> s.addFunction (name, params, body)
+      esac
+      }, s.enterScope, defs), w], e) of
+        [[s, w], v] -> [[s.leaveScope, w], v]
+      esac
+  | Call (f, args) -> checkFun (s, f);
+                      case s.lookup (f) of
+                        Fun (fargs, body) ->
+                          if fargs.size != args.size
+                            then error (sprintf ("Wrong number of parameters in ""%s"" call", f), getLoc (f))
+                          fi;
+                          case evalList (c, args) of
+                            [[s, w], vals] ->
+                            var state;
+                            state := foldl (fun (s, [name, v]) {s.addName (name, Var (v))},
+                                                 enterFunction (s),
+                                                 zip (fargs, vals));
+                            case eval ([state, w], body) of
+                              [[state, w], v] -> [[s.leaveFunction (getGlobal (state)), w], v]
+                            esac
+                          esac
+                      esac
+  | _ -> failure ("this eval: {%s} is not yet implemented\n", expr.string)
+  esac
 }
-(* End *)
 
 -- Evaluates a program with a given input and returns an output
 public fun evalExpr (input, expr) {
