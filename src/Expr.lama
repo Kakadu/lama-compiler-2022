@@ -94,11 +94,62 @@ fun evalList (c, exprs) {
   esac
 }
 
-(* Assignment *)
-fun eval (c@[s, w], expr) {
-  failure ("evalExpr not implemented\n")
+fun evalLoop(c, cond, body) {
+  case eval(c, cond) of [c, Var(v)] ->
+    if v then
+      case eval(c, body) of [c, _] -> evalLoop(c, cond, body) esac
+    else
+      c
+    fi
+  esac
 }
-(* End *)
+
+fun eval (c@[s, w], expr) {
+  case expr of
+    Assn (e1, e2) ->
+      case evalList(c, {e1, e2}) of [[s, w], {Ref(x), Var(v)}] -> [[s <- [x, Var(v)], w], Var(v)] esac
+    | Seq (e1, e2) ->
+      case evalList(c, {e1, e2}) of [c, {_, v}] -> [c, v] esac
+    | Skip -> [c, Void]
+    | Read (x) -> case w.readWorld of [v, w] -> [[s <- [x, Var(v)], w], Void] esac
+    | Write (e) -> case eval(c, e) of [[s, w], Var(v)] -> [[s, writeWorld(v, w)], Void] esac
+    | If (e1, e2, e3) ->
+      case eval(c, e1) of [c, Var(cond)] -> if cond then eval(c, e2) else eval(c, e3) fi esac
+    | While (cond, body) -> [evalLoop(c, cond, body), Void]
+    | DoWhile (body, cond) -> case eval(c, body) of [c, _] -> [evalLoop(c, cond, body), Void] esac
+    | Var (x) -> [c, case lookup(s, x) of Var(v) -> Var(v) esac]
+    | Ref (x) -> [c, Ref(x)]
+    | Const (n) -> [c, Var(n)]
+    | Binop (op, l, r) ->
+      case evalList(c, {l, r}) of [c, {Var(l), Var(r)}] -> [c, Var(evalOp(op, l, r))] esac
+    | Ignore (e) -> case eval(c, e) of [c, _] -> [c, Void] esac
+    | Scope (ds, e) ->
+      fun addDefs(s, ds) {
+        foldl(
+          fun(s, d) {
+            case d of
+              Var (ds) -> addNames(s, ds)
+            | Fun (name, args, body) -> addFunction(s, name, args, body)
+            esac
+          }, s, ds)
+      }
+
+      case eval([addDefs(enterScope(s), ds), w], e) of [[s, w], v] -> [[leaveScope(s), w], v] esac
+
+    | Call (fname, args) ->
+      case evalList(c, args) of [[s, w], args] ->
+        case lookup(s, fname) of Fun (argNames, body) ->
+          fun copyArg(s, [argName, arg]) {
+            addName(s, argName, arg)
+          }
+
+          case eval([foldl(copyArg, enterScope(enterFunction(s)), zip(argNames, args)), w], body) of
+            [[sFun, w], Var(v)] -> [[leaveFunction(s, getGlobal(sFun)), w], Var(v)]
+          esac
+        esac
+      esac
+  esac
+}
 
 -- Evaluates a program with a given input and returns an output
 public fun evalExpr (input, expr) {
