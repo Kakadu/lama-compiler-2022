@@ -358,11 +358,11 @@ fun prologue (fLabel) {
 
 -- Generates function epilogue
 fun epilogue (env) {
-  var metaDef = Meta (sprintf ("\t.set\t%s_SIZE,\t%d\n", env.currentFunction, env.staticSize * wordSize));
+  var metaDef = Meta (sprintf ("\t.set\t%s_SIZE,\t%d\n", currentFunction(env), staticSize(env) * wordSize));
 
-  if compare (env.currentFunction, "main") == 0
+  if compare (currentFunction(env), "main") == 0
   then [env, singletonBuffer (Mov (ebp, esp)) <+ Pop (ebp) <+ Binop ("^", eax, eax) <+ Ret <+ metaDef]
-  else case env.pop of
+  else case pop(env) of
          [y, env] -> [env, singletonBuffer (Mov (y, eax)) <+ Mov (ebp, esp) <+ Pop (ebp) <+ Ret <+ metaDef]
        esac
   fi
@@ -416,11 +416,11 @@ fun compile (env, code) {
         var code = scode <+ Meta ("# " ++ showSMInsn (i) ++ "\n");
         case i of
           READ ->
-            case env.allocate of
+            case allocate(env) of
 	      [s, env] -> [env, code <+ Push (edx) <+ Push (ecx) <+ Call ("Lread") <+ Pop (ecx) <+ Pop (edx) <+ Mov (eax, s)]
             esac             
         | WRITE ->
-            case env.pop of
+            case pop(env) of
 	      [s, env] -> [env, code <+ Push (edx) <+ Push (ecx) <+ Push (s) <+ Call ("Lwrite") <+ Pop (eax) <+ Pop (ecx) <+ Pop (edx)]
             esac
         (* Assignment *)
@@ -441,8 +441,95 @@ fun compile (env, code) {
          --    env.enterFunction to create a proper environment;
          -- 2. generate epilogue for END instruction.
                
-        | _ -> failure ("codegeneration for instruction %s is not yet implemented\n", i.string)
-        (* End *)
+        | CONST (n) ->
+          case allocate(env) of
+          [s, env] -> [env, code <+> move (L (n), s)]
+          esac
+        | GLOBAL (x) -> [addGlobal(env, x), code]
+        | LABEL (l) -> [if isBarrier(env) then retrieveStack(env, l) else env fi, code <+ Label (l)]
+        | JMP (l) -> [setBarrier(env), code <+ Jmp (l)]
+        | CJMP (c, l) ->
+          case pop(env) of
+          [x, env] -> [setStack(env, l), code <+> move (x, eax) <+ Binop ("&&", eax, eax) <+ CJmp (c, l)]
+          esac
+        | DROP ->
+          case pop(env) of
+          [x, env] -> [env, code]
+          esac
+        | LDA (x) ->
+          case allocate(env) of
+            [s, env] -> [env, code <+ Lea(loc(env, x), eax) <+> move(eax, s)]
+          esac
+        | LD (x) ->
+          case allocate(env) of
+            [s, env] -> [env, code <+> move(loc(env, x), s)]
+          esac
+        | STI  ->
+          case pop2(env) of
+          [z, a, env] -> [push(env, z), code <+> move (z, I (0, a))]
+          esac
+        | ST (x)      -> [env, code <+> move(peek(env), loc(env, x))]
+        | BINOP (op)  -> case pop2(env) of
+        [y, x, env] -> (
+          var compiled =
+            if compare(op, "+") == 0 !! compare(op, "-") == 0 !! compare(op, "*") == 0 then
+              move (x, eax) <+ Binop (op, y, eax) <+> move (eax, x)
+            elif compare(op, "/") == 0 !! compare(op, "%") == 0 then
+              move (x, eax) <+ Cltd <+ IDiv (y) <+> move (if compare (op, "/") == 0 then eax else edx fi, x)
+            elif compare(op, "<") == 0 !! compare(op, ">") == 0 !! compare(op, "<=") == 0 !! compare(op, ">=") == 0 !! compare(op, "==") == 0 !! compare(op, "!=") == 0 then
+              move (x, eax) <+ Binop ("^", edx, edx) <+ Binop ("cmp", y, eax) <+ Set (suffix (op), "%dl") <+> move (edx, x)
+            elif compare(op, "&&") == 0 !! compare(op, "!!") == 0 then
+              listBuffer ({
+                Binop ("^", eax, eax), Binop ("cmp", x, eax), Set (suffix ("!="), "%al"),
+                Binop ("^", edx, edx), Binop ("cmp", y, edx), Set (suffix ("!="), "%dl"),
+                Binop (op, edx, eax), Mov (eax, x)
+              })
+            else
+              failure ("unkown binary operator %s\n", op)
+            fi
+          ;
+          [push(env, x), code <+> compiled]
+        )
+        esac
+        | CALL (fLab, na) ->
+          case foldl(
+            fun ([pushes, pops], r) { [pushes <+ Push(r), Pop(r) : pops] },
+            [emptyBuffer(), {}],
+            liveRegisters(env, na)
+          ) of
+            [pushRegsCode, popRegsCodeList] ->
+              var popRegsCode = listBuffer(popRegsCodeList);
+
+              fun pushArgs(env, pushArgsCode, n) {
+                if n == 0
+                  then [env, pushArgsCode]
+                  else
+                    case pop(env) of
+                      [x, env] -> pushArgs(env, pushArgsCode <+ Push(x), n - 1)
+                    esac
+                fi
+              }
+
+              case pushArgs(env, emptyBuffer(), na) of
+                [env, pushArgsCode] ->
+                  case allocate(env) of
+                    [x, env] -> [env,
+                      code
+                        <+> pushRegsCode
+                        <+> pushArgsCode
+                        <+ Call(fLab)
+                        <+ Binop("+", L(wordSize * na), esp)
+                        <+> popRegsCode
+                        <+ Mov(eax, x)]
+                  esac
+              esac
+          esac
+        | BEGIN (fLab, na, nl) -> [enterFunction(env, fLab, nl), code <+> prologue(fLab)]
+        | END ->
+          case epilogue(env) of
+            [env, endCode] -> [env, code <+> endCode]
+          esac
+        | _  -> failure ("codegeneration for instruction %s is not yet implemented\n", i.string)
         esac
       }, [env, emptyBuffer ()], code)
   }
