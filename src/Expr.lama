@@ -79,17 +79,28 @@ fun addNames (state, names) {
 fun addFunction (state, name, args, body) {
   state.addName (name, Fun (args, body))
 }
-                                        
+
+fun addDefinitions (state, defs) {
+  foldl (fun (s, def) {
+    case def of 
+      Fun (name, args, body) -> addFunction(s, name, args, body)
+    | Var (name) -> addName (s, name, Var (0))
+    esac
+  }, state, defs)
+}
+
 -- Evaluates a list of expressions, properly threading a configurations.
 -- Returns the final configuration and the list of values
 fun evalList (c, exprs) {
-  case foldl (fun ([c, vals], e) {
-                case eval (c, e) of
-                  [c, v] -> [c, v : vals]
-                esac
-              },
-              [c, {}],
-              exprs) of
+  case foldl (
+    fun ([c, vals], e) {
+      case eval (c, e) of
+        [c, v] -> [c, v : vals]
+      esac
+    },
+    [c, {}],
+    exprs
+  ) of
     [c, vals] -> [c, reverse (vals)]
   esac
 }
@@ -98,8 +109,13 @@ fun evalList (c, exprs) {
 fun eval (c@[st, w], expr) {
   case expr of
     Const (const) -> [c, const]
-  | Var (v) -> [c, st(v)]
+  | Var (name) -> 
+    [c, lookup (st, name, None)]
   | Ref (x) -> [c, Ref (x)]
+  | Scope (vars, e) -> 
+    case eval ([addDefinitions (enterScope (st), vars), w], e) of
+      [[st, w], v] -> [[leaveScope (st), w], v] 
+    esac
   | Ignore (e) -> 
     case eval (c, e) of
       [c, _] -> [c, None] 
@@ -142,12 +158,32 @@ fun eval (c@[st, w], expr) {
       [c, 0] -> eval (c, elseBody)
     | [c, _] -> eval (c, thenBody)
     esac
+  | Call (name, exprs) -> 
+    var oldSt = st;
+    case lookup (st, name, None) of
+      Fun (args, body) ->
+        case foldl(
+          fun (st, [n, v]) {
+            st <- [n, v]
+          },
+          addNames (enterFunction(st), args),
+          zip (args, evalList(c, exprs)[1])
+        ) of
+          st -> 
+          case eval ([st, w], body) of
+            [[st, w], v] -> [[leaveFunction (oldSt, getGlobal (st)), w], v]
+          esac 
+        esac
+    esac
   esac
 }
 (* End *)
 
 -- Evaluates a program with a given input and returns an output
 public fun evalExpr (input, expr) {
+  -- case expr of 
+  --   A -> 0
+  -- esac
   case eval ([emptyState (), createWorld (input)], expr) of
     [c, _] -> c.snd.getOutput
   esac
