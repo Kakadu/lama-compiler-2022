@@ -2,3 +2,13 @@
 *.s
 /src/lama-impl
 
+
+regression/deep-expressions/
+
+regression/expressions/
+
+*.lama
+
+regression/
+
+*.o
