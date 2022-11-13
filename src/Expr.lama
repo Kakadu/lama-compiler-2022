@@ -79,7 +79,7 @@ fun addNames (state, names) {
 fun addFunction (state, name, args, body) {
   state.addName (name, Fun (args, body))
 }
-                                        
+
 -- Evaluates a list of expressions, properly threading a configurations.
 -- Returns the final configuration and the list of values
 fun evalList (c, exprs) {
@@ -95,8 +95,92 @@ fun evalList (c, exprs) {
 }
 
 (* Assignment *)
-fun eval (c@[s, w], expr) {
-  failure ("evalExpr not implemented\n")
+fun eval (c@[st, w], expr) {
+  case expr of
+    Assn (e1, e2) ->
+      case evalList (c, {e1, e2}) of [[st, w], {Ref (key), Val (v)}] ->
+        checkVar (st, key);
+        [[st <- [key, Var (v)], w], Val (v)]
+      esac
+  | Seq (e1, e2) ->
+      case evalList (c, {e1, e2}) of [c, {_, x}] ->
+        [c, x]
+      esac
+  | Skip ->
+      [c, Void]
+  | Read (key) ->
+      checkVar (st, key);
+      case readWorld (w) of [v, w] ->
+        [[st <- [key, Var (v)], w], Void]
+      esac
+  | Write (e) ->
+      case eval (c, e) of [c, Val (v)] ->
+        [[st, writeWorld (v, w)], Void]
+      esac
+  | If (e, s1, s2) ->
+      case eval (c, e) of [c, Val (v)] ->
+        eval (c, if v then s1 else s2 fi)
+      esac
+  | While (e, s) ->
+      case eval (c, e) of [c, Val (v)] ->
+        if v
+        then case eval (c, s) of [c, _] -> eval (c, While (e, s)) esac
+        else [c, Void]
+        fi
+      esac
+  | DoWhile (s, e) ->
+      case eval (c, s) of [c, _] ->
+        eval (c, While (e, s))
+      esac
+  | Var (x) ->
+      case lookup (st, x) of Var (v) ->
+        [c, Val (v)]
+      esac
+  | Ref (x) ->
+      [c, Ref (x)]
+  | Const (n) ->
+      [c, Val (n)]
+  | Binop (op, e1, e2) ->
+      case evalList (c, {e1, e2}) of [c, {Val (v1), Val (v2)}] ->
+        [c, Val (evalOp (op, v1, v2))]
+      esac
+  | Ignore (e) ->
+      case eval (c, e) of [c, _] ->
+        [c, Void]
+      esac
+  | Scope (ds, e) ->
+      var newState = foldl (
+        fun (st, d) {
+          case d of
+            Var (names) -> addNames (st, names)
+          | Fun (name, args, body) -> addFunction (st, name, args, body)
+          esac
+        },
+        enterScope (st),
+        ds
+      );
+      case eval ([newState, w], e) of [[st, w], ret] ->
+        [[leaveScope (st), w], ret]
+      esac
+  | Call (f, exprs) ->
+      checkFun (st, f);
+      case lookup (st, f) of Fun (argNames, body) ->
+        case evalList (c, exprs) of [c, argVals] ->
+          var newState = foldl (
+            fun (st, [argName, argVal]) {
+              case argVal of Val (v) ->
+                addName (st, argName, Var (v))
+              esac
+            },
+            enterFunction (st),
+            zip (argNames, argVals)
+          );
+          case eval ([newState, w], body) of [[newState, w], ret] ->
+            [[leaveFunction (st, getGlobal (newState)), w], ret]
+          esac
+        esac
+      esac
+  esac
 }
 (* End *)
 
