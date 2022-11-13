@@ -163,12 +163,12 @@ fun eval (env, w, insns) {
               | [s, insns] : cst -> eval ([st, cst, s, w], insns)
             esac
           | CALL (f, _) -> eval ([st, [s, insns]:cst, s, w], fromLabel (env, f))
-          | BEGIN (_, na, nl) : p ->
+          | BEGIN (_, na, nl) ->
             case take(st, na) of
               [st, as] ->
                 var new = makeState(na, nl);
                 foldl(fun (i, a) { assign(new, Arg(i), a); i + 1 }, 0, as);
-                eval([st, cst, new, w], p)
+                eval([st, cst, new, w], insns)
             esac
           | GLOBAL (x) -> assign (s, Glb (x), 0); eval (c, insns)
         esac
