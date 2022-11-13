@@ -79,7 +79,24 @@ fun addNames (state, names) {
 fun addFunction (state, name, args, body) {
   state.addName (name, Fun (args, body))
 }
-                                        
+
+
+fun addDefinitions (state, defs) {
+    case defs of 
+        Var (names) : tl -> addDefinitions(addNames(state, names), tl)
+      | Fun (name, args, body) : tl -> addDefinitions(addFunction(state, name, args, body), tl)
+      | {} -> state
+    esac 
+}                       
+
+
+fun bindNamesAndValues (st, names, vals) {
+  case names of
+      name : names -> bindNamesAndValues (st <- [name, vals.hd], names, vals.tl) 
+    | {} -> st
+  esac 
+}
+
 -- Evaluates a list of expressions, properly threading a configurations.
 -- Returns the final configuration and the list of values
 fun evalList (c, exprs) {
@@ -94,11 +111,77 @@ fun evalList (c, exprs) {
   esac
 }
 
-(* Assignment *)
-fun eval (c@[s, w], expr) {
-  failure ("evalExpr not implemented\n")
+
+fun eval (c@[st, w], expr) {
+  case expr of
+      Assn (exp1, exp2) -> 
+        case evalList (c, {exp1, exp2}) of 
+          [[st, w], {ref, v}] -> [[st <- [ref, v], w], v]
+        esac
+    | Seq (x, y) -> 
+        case evalList (c, {x, y}) of 
+          [c, {_ , v}] -> [c, v]
+        esac
+    | Read (s) -> 
+        case readWorld(w) of 
+          [k1, k2] -> [[st <- [s, k1], k2], 0]
+        esac
+    | Write (exp) -> 
+        case eval(c, exp) of
+          [[st2, w2], v] -> [[st2, writeWorld(v, w2)], 0]
+        esac
+    | If (expr, stmt1, stmt2) ->
+        if eval(c, expr)[1] then eval(c, stmt1) else eval(c, stmt2) fi
+    | Binop (s, exp1, exp2) -> 
+        case evalList (c, {exp1, exp2}) of 
+          [c, {v1, v2}] -> [c, evalOp(s, v1, v2)]
+        esac
+    | Ref     (s)         -> [c, s]
+    | Ignore  (exp)       -> [eval(c, exp)[0], 0]
+    | Skip                -> [c, 0]
+    | Var (s)             -> [c, lookup(st, s)]
+    | Const (i)           -> [c, i]
+    | While (cond, body)  -> 
+        while eval(c, cond)[1] do
+          c := eval(c, body)[0]
+        od;
+        [c, 0]
+    | DoWhile (exp, cond) -> 
+        do
+          c := eval(c, exp)[0]
+        while eval(c, cond)[1] od;
+        [c, None]
+    | Scope (ds, exp) ->
+        case enterScope(st) of 
+          st -> case addDefinitions(st, ds) of 
+            st -> case eval([st, w], exp) of
+                      [[st, w], v] -> [[leaveScope(st), w], v]
+                  esac 
+                esac
+        esac
+    | Call (name, args) ->
+        -- I decided to make this piece huge, but more understandable
+        case evalList(c, args) of
+          [[st, w], vals] -> 
+          case enterFunction(st) of 
+            fst -> 
+              case lookup(fst, name) of 
+                Fun (args, body) -> 
+                  case addNames(fst, args) of 
+                    fst -> 
+                      case bindNamesAndValues(fst, args, vals) of 
+                        fst -> 
+                          case eval ([fst, w], body) of
+                            [[fst, w], v] -> 
+                              [[leaveFunction(st, getGlobal(fst)), w], v]
+                          esac
+                      esac 
+                  esac
+              esac
+          esac
+        esac
+  esac
 }
-(* End *)
 
 -- Evaluates a program with a given input and returns an output
 public fun evalExpr (input, expr) {
