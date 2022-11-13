@@ -96,7 +96,92 @@ fun evalList (c, exprs) {
 
 (* Assignment *)
 fun eval (c@[s, w], expr) {
-  failure ("evalExpr not implemented\n")
+ case expr of
+    Assn (e1, e2) ->
+      case evalList (c, { e1, e2 }) of
+        [[s, w], { Ref (x), Val (y) }] -> [[s <- [x, Var (y)], w], Val (y)]
+      esac
+  | Seq (e1, e2) ->
+      case evalList (c, { e1, e2 }) of
+        [c, { l, r }] -> [c, r]
+      esac
+  | Skip -> [c, Void]
+  | Read (x) ->
+      checkVar (s, x);
+      case readWorld (w) of
+        [v, w] -> [[s <- [x, Var (v)], w], Void]
+      esac
+  | Write (e) ->
+      case eval (c, e) of
+        [[s, w], Val (x)] -> [[s, writeWorld (x, w)], Void]
+      esac
+  | If (cond, e1, e2) ->
+      case eval (c, cond) of
+        [c, Val (v)] -> eval (c, if v then e1 else e2 fi)
+      esac
+  | While (cond, e) ->
+      case eval (c, cond) of
+        [c, Val (v)] ->
+          if v then
+            case eval (c, e) of [c, _] -> eval (c, expr) esac
+          else
+            [c, Void]
+          fi
+      esac
+  | DoWhile (e, cond) ->
+      case eval (c, e) of
+        [c, _] -> eval (c, While (cond, e))
+      esac
+  | Var (x) ->
+      checkVar (s, x);
+      case lookup (s, x) of
+        Var (x) -> [c, Val (x)]
+      esac
+  | Ref (x) -> checkVar (s, x); [c, Ref (x)]
+  | Const (n) -> [c, Val (n)]
+  | Binop (str_op, e1, e2) ->
+      case evalList (c, { e1, e2 }) of
+        [c, { Val (x), Val (y) }] -> [c, Val (evalOp (str_op, x, y))]
+      esac
+  | Ignore (e) -> case eval (c, e) of [c, v] -> [c, Void] esac
+  | Scope   (defs, expr)               ->
+      var new_s = foldl (fun (s, d) {
+                           case d of
+                             Var (names) -> addNames (s, names)
+                           | Fun (name, args, body) -> addFunction (s, name, args, body)
+                           esac
+                         },
+                         enterScope (s),
+                         defs);
+
+      case eval ([new_s, w], expr) of
+        [[s, w], v] -> [[leaveScope (s), w], v]
+      esac
+  | Scope (defs, e) ->
+      var e = eval ([foldl (fun (s, def) {
+        case def of
+          Var (names) -> addNames (s, names)
+        | Fun (name, args, body) -> addFunction (s, name, args, body)
+        esac
+      }, s.enterScope, defs), w], e);
+      case e of
+        [[s, w], v] -> [[leaveScope (s), w], v]
+      esac
+   | Call (f, args) ->
+      checkFun (s, f);
+      case lookup (s, f) of
+        Fun (params, body) ->
+          case evalList (c, args) of
+            [c, args] ->
+              var e = eval ([foldl (fun (s, [name, Val (v)]) { addName (s, name, Var (v)) },
+                                    enterFunction (s), zip (params, args)),
+                             w], body);
+              case e of
+                [[new_s, w], v] -> [[leaveFunction (s, getGlobal (new_s)), w], v]
+              esac
+        esac
+      esac
+  esac
 }
 (* End *)
 

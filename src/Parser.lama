@@ -120,10 +120,37 @@ var primary    = memo $ eta syntax (
                                                                                                             | Some (args) -> assertValue (a, Call (x, args))
                                                                                                             esac
                                                                                                          }} |
-(* Assignment *)
-                                      $(failure ("the rest of primary parsing in not implemented\n"))),
-(* End *)
-      basic      = memo $ eta (expr ({[Right, {[s (":="),
+  inbr[s ("("), scopeExpr, s (")")] |
+  loc=pos kSkip { fun (a) { assertVoid (a, Skip, loc) } } |
+  loc=pos kRead x=inbr[s ("("), lident, s (")")] { fun (a) { assertVoid (a, Read (x), loc) } } |
+  loc=pos kWrite e=inbr[s ("("), exp, s (")")] { fun (a) { assertVoid (a, Write (e (Val)), loc) } } |
+  loc=pos kIf e=exp kThen ifBranch=exp elseBranch=elseBranchSyntax {
+      fun (a) {
+        If (e (Val), ifBranch (a), elseBranch (a))
+      }
+    } |
+  loc=pos kWhile e=exp kDo body=scopeExpr kOd { fun (a) { assertVoid (a, While (e (Val), body (Void)), loc) } } |
+  loc=pos kDo body=scopeExpr kWhile e=exp kOd { fun (a) {
+    distributeScope (body (Void), fun (body) { assertVoid (a, DoWhile (body, e (Val)), loc) }) }
+  } |
+  loc=pos kFor s1=scopeExpr s[","] e=exp s[","] s2=exp kDo body=scopeExpr kOd {
+    fun (a) {
+      distributeScope (s1 (Void), fun (s1) {
+        assertVoid (a, Seq (s1 , While (e (Val), Seq (body (Void), s2 (Void)))), loc)
+      })
+    }
+  }
+  ),
+  elseBranchSyntax = memo $ eta syntax (
+    kElse elseBranch=scopeExpr kFi { fun (a) { elseBranch (a) } } |
+    kElif e=exp kThen ifBranch=scopeExpr elseBranch=elseBranchSyntax {
+      fun (a) {
+        If (e (Val), ifBranch (a), elseBranch (a))
+      }
+    } |
+    loc=pos kFi { fun (a) { assertVoid (a, Skip, loc) } }
+  ),
+  basic      = memo $ eta (expr ({[Right, {[s (":="),
                                                 fun (l, loc, r) {
                                                   fun (a) {assertValue (a, Assn (l (Ref), r (Val)), loc)}
                                                 }]}],
