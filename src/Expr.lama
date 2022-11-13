@@ -94,9 +94,94 @@ fun evalList (c, exprs) {
   esac
 }
 
+fun evalWhile(c, cond, e) {
+  case eval(c, cond) of [c, Var(v)] ->
+    if v then
+      case eval(c, e) of [c, _] -> evalWhile(c, cond, e) esac
+    else
+      c
+    fi
+  esac
+}
+
 (* Assignment *)
 fun eval (c@[s, w], expr) {
-  failure ("evalExpr not implemented\n")
+  case expr of
+    Assn (e1, e2) ->
+      case evalList(c, {e1, e2}) of [[s, w], {Ref (x), Var (v)}] ->
+        [[s <- [x, Var (v)], w], Var (v)]
+      esac
+  | Seq (e1, e2) ->
+      case evalList(c, {e1, e2}) of [c, {_, v}] ->
+        [c, v]
+      esac
+  | Skip ->
+      [c, Void]
+  | Ignore (e) ->
+      case eval(c, e) of [c, _] ->
+        [c, Void]
+      esac
+  | Read (x) ->
+      case w.readWorld of [v, w] ->
+        [[s <- [x, Var (v)], w], Void]
+      esac
+  | Write (e) ->
+      case eval(c, e) of [[s, w], Var (v)] ->
+          [[s, writeWorld(v, w)], Void]
+      esac
+  | If (e1, e2, e3) ->
+      case eval(c, e1) of [c, Var (cond)] ->
+        if cond
+        then eval(c, e2)
+        else eval(c, e3)
+        fi
+      esac
+  | While (cond, e) ->
+      [evalWhile(c, cond, e), Void]
+  | DoWhile (e, cond) ->
+      case eval(c, e) of [c, _] ->
+        [evalWhile(c, cond, e), Void]
+      esac
+  | Var (x) ->
+      case lookup(s, x) of Var (v) ->
+        [c, Var (v)]
+      esac
+  | Ref (x) ->
+      [c, Ref (x)]
+  | Const (n) ->
+      [c, Var (n)]
+  | Binop (op, l, r) ->
+      case evalList(c, {l, r}) of [c, { Var (l), Var (r) }] ->
+        [c, Var (evalOp(op, l, r))]
+      esac
+  | Scope (ds, e) ->
+      fun addDefs(s, ds) {
+        foldl(
+          fun(s, d) {
+            case d of
+              Var (ds) -> addNames(s, ds)
+            | Fun (name, args, body) -> addFunction(s, name, args, body)
+            esac
+          }, s, ds)
+      }
+
+      case eval([addDefs(enterScope(s), ds), w], e) of [[s, w], v] ->
+        [[leaveScope(s), w], v]
+      esac
+
+  | Call (funcName, args) ->
+      case evalList(c, args) of [[s, w], args] ->
+        case lookup(s, funcName) of Fun (argNames, body) ->
+          fun copyArg(s, [argName, arg]) {
+            addName(s, argName, arg)
+          }
+
+          case eval([foldl(copyArg, enterScope(enterFunction(s)), zip(argNames, args)), w], body) of
+            [[sFun, w], Var (v)] -> [[leaveFunction(s, getGlobal(sFun)), w], Var (v)]
+          esac
+        esac
+      esac
+  esac
 }
 (* End *)
 
