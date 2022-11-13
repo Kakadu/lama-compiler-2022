@@ -79,7 +79,7 @@ fun addNames (state, names) {
 fun addFunction (state, name, args, body) {
   state.addName (name, Fun (args, body))
 }
-                                        
+
 -- Evaluates a list of expressions, properly threading a configurations.
 -- Returns the final configuration and the list of values
 fun evalList (c, exprs) {
@@ -95,10 +95,75 @@ fun evalList (c, exprs) {
 }
 
 (* Assignment *)
-fun eval (c@[s, w], expr) {
-  failure ("evalExpr not implemented\n")
+fun eval(c@[s, world], expr) {
+  case expr of
+    Assn (l, r)        -> case evalList(c, { l, r }) of
+      [[s, w], { LValue (x), z }] -> [[s <- [x, Var(z)], w], z]
+    esac
+    | Seq (e1, e2)     -> case evalList(c, { e1, e2 }) of
+      [c, { 0, z }] -> [c, z]
+    esac
+    | Skip             -> [c, 0]
+    | Read (x)         -> checkVar(s, x); case readWorld(world) of
+      [z, w] -> [[s <- [x, Var(z)], w], 0]
+    esac
+    | Write (e)        -> case
+      eval(c, e) of [[s, w], z] -> [[s, writeWorld(z, w)], 0]
+    esac
+    | If (e1, e2, e3)  -> case eval(c, e1) of
+      [c, 0]   -> eval(c, e3)
+      | [c, _] -> eval(c, e2)
+    esac
+    | While (e1, e2)   -> case eval(c, e1) of
+      [c, 0]   -> [c, 0]
+      | [c, _] -> case eval(c, e2) of
+        [c, 0] -> eval(c, expr)
+      esac
+    esac
+    | DoWhile (e1, e2) -> case eval(c, e1) of
+      [c, 0] -> case eval(c, e2) of
+        [c, 0]   -> [c, 0]
+        | [c, _] -> eval(c, expr)
+      esac
+    esac
+    | Var (x)          -> checkVar(s, x); [c, case lookup(s, x) of Var (z) -> z esac]
+    | Ref (x)          -> checkVar(s, x); [c, LValue(x)]
+    | Const (n)        -> [c, n]
+    | Binop (op, l, r) -> case evalList(c, { l, r }) of
+      [c, { l, r }] -> [c, evalOp(op, l, r)]
+    esac
+    | Ignore (e)       -> case eval(c, e) of
+      [c, _] -> [c, 0]
+    esac
+    | Call (f, as)     ->
+      checkFun(s, f);
+      case lookup(s, f) of
+        Fun(ns, b) ->
+          if size(ns) != size(as) then
+            error(sprintf("unexpected number of arguments for function %s", f), getLoc(f))
+          fi;
+          case evalList(c, as) of
+            [[s, w], vs] ->
+              case eval([
+                foldl(fun (s, [n, v]) { addName(s, n, Var(v)) }, enterFunction(s), zip(ns, vs)),
+                w
+              ], b) of
+                [[s_modified, w], v] -> [[s.leaveFunction(getGlobal(s_modified)), w], v]
+              esac
+          esac
+      esac
+    | Scope (ds, e)    ->
+      case eval([
+        foldl(fun (s, d) { case d of
+          Var (ns) -> addNames(s, ns)
+          | Fun (n, as, b) -> addFunction(s, n, as, b)
+        esac }, enterScope(s), ds),
+        world
+      ], e) of
+        [[s, w], v] -> [[leaveScope(s), w], v]
+      esac
+  esac
 }
-(* End *)
 
 -- Evaluates a program with a given input and returns an output
 public fun evalExpr (input, expr) {
