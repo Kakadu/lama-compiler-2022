@@ -134,7 +134,7 @@ fun eval(env, w, insns) {
       | LD (x) : p            -> eval([lookup(s, x):st, cst, s, w], p)
       | LDA (x) : p           -> eval([x:st, cst, s, w], p)
       | ST (x) : p            -> case st of v : _ -> assign(s, x, v); eval(c, p) esac
-      | STI : p               -> case st of v : x : st -> assign(s, x, v); eval([v:st, cst, s, w], p) esac
+      | STI : p               -> case st of v : x : st -> eval([assign(s, x, v):st, cst, s, w], p) esac
       | SEXP (x, n) : p       -> case take(st, n) of [st, vs] -> eval([Sexp(x, listArray(vs)):st, cst, s, w], p) esac
       | CONST (n) : p         -> eval([n:st, cst, s, w], p)
       | LABEL (_) : p         -> eval(c, p)
@@ -156,10 +156,25 @@ fun eval(env, w, insns) {
         esac
       | GLOBAL (x) : p        -> assign(s, Glb(x), 0); eval(c, p)
       | END : _               -> case cst of { } -> c | [s, p] : cst -> eval([st, cst, s, w], p) esac
+      | DUP : p               -> case st of x : _ -> eval([x:st, cst, s, w], p) esac
       | DROP : p              -> case st of _ : st -> eval([st, cst, s, w], p) esac
       | STRING (x) : p        -> eval([x:st, cst, s, w], p)
       | ARRAY (n) : p         -> case take(st, n) of [st, vs] -> eval([listArray(vs):st, cst, s, w], p) esac
-      | STA : p               -> case st of v : i : a : st -> eval([((case a of Sexp(_, vs) -> vs | vs@#array -> vs | vs@#str -> vs esac)[i] := v):st, cst, s, w], p) esac
+      | STA : p               ->
+        case st of
+          v : i : a : st -> eval(
+            [
+              (
+                case a of
+                    Sexp(_, vs) -> vs[i] := v
+                  | vs@#array   -> vs[i] := v
+                  | vs@#str     -> vs[i] := v
+                  | x           -> assign(s, x, v)
+                esac
+              ):st, cst, s, w
+            ], p
+          )
+        esac
       | ELEM : p              -> case st of i : a : st -> eval([(case a of Sexp(_, vs) -> vs | vs@#array -> vs | vs@#str -> vs esac)[i]:st, cst, s, w], p) esac
       | BUILTIN (f, n) : p    -> case take(st, n) of [st, as] -> case evalBuiltin(f, as, w) of [v, w] -> eval([v:st, cst, s, w], p) esac esac
     esac
@@ -441,30 +456,26 @@ public fun compileSM(stmt) {
     case stmt of
         Skip               -> [false, env, emptyBuffer()]
       | Var (x)            -> [false, env, singletonBuffer(LD(lookupVal(env, x)))]
-      | Ref (x)            -> [false, env, singletonBuffer(LDA(lookupVar(env, x)))]
+      | Ref (x)            -> [false, env, singletonBuffer(LDA(lookupVar(env, x))) <+ DUP]
       | Const (n)          -> [false, env, singletonBuffer(CONST(n))]
-      | Assn (r, e)        ->
-        case genLabels(env, 2) of
-          [eLab, stLab, env] ->
-            case compile(eLab, env, r) of
-              [eLabUsed, env, lCode] ->
-                case compile(stLab, env, e) of
-                  [stLabUsed, env, eCode] ->
-                    [
-                      false,
-                      env,
-                      lCode <+> label(eLab, eLabUsed) <+> eCode <+> label(stLab, stLabUsed) <+ case r of ElemRef(_, _) -> STA | _ -> STI esac
-                    ]
-                esac
-            esac
-        esac
-      | Set (x, e)         ->
+      | Assn (Ref(x), e)   ->
         case genLabel(env) of
           [stLab, env] ->
             case compile(stLab, env, e) of
               [stLabUsed, env, code] -> [false, env, code <+> label(stLab, stLabUsed) <+ ST(lookupVar(env, x))]
             esac
         esac
+      | Assn (e1, e2)      ->
+        case genLabels(env, 2) of
+          [eLab, stLab, env] ->
+            case compile(eLab, env, e1) of
+              [eLabUsed, env, lCode] ->
+                case compile(stLab, env, e2) of
+                  [stLabUsed, env, eCode] -> [false, env, lCode <+> label(eLab, eLabUsed) <+> eCode <+> label(stLab, stLabUsed) <+ STA]
+                esac
+            esac
+        esac
+      | Set (x, e)         -> compile(lab, env, Assn(Ref(x), e))
       | Seq (e1, e2)       ->
         case genLabel(env) of
           [s2Lab, env] ->

@@ -470,8 +470,19 @@ fun compile(env, code) {
   fun compile(env, code) {
     foldl(
       fun ([env, scode], i) {
+        fun addSubMulCommonCode(op, x, y) {
+          if memOpnd(x)
+            then singletonBuffer(Mov(x, eax)) <+ Binop(op, y, eax) <+ Mov(eax, x)
+            else singletonBuffer(Binop(op, y, x))
+          fi
+        }
+
         fun saveRegs(env, depth) {
-          foldl(fun ([pushes, pops], r) { [pushes <+ Push(r), singletonBuffer(Pop(r)) <+> pops] }, [emptyBuffer(), emptyBuffer()], liveRegisters(env, depth))
+          foldl(
+            fun ([pushes, pops], r) { [pushes <+ Push(r), singletonBuffer(Pop(r)) <+> pops] },
+            [emptyBuffer(), emptyBuffer()],
+            liveRegisters(env, depth)
+          )
         }
 
         fun pushArgs(env, pushArgsCode, n) {
@@ -490,27 +501,28 @@ fun compile(env, code) {
             BINOP (op)           ->
               case pop2(env) of
                 [y, x, env] -> [push(env, x), code <+>
-                  if compare(op, "+") == 0 !! compare(op, "-") == 0 !! compare(op, "*") == 0
+                  if compare(op, "+") == 0
                     then
-                      if memOpnd(x)
-                        then singletonBuffer(Mov(x, eax)) <+ Binop(op, y, eax) <+ Mov(eax, x)
-                        else singletonBuffer(Binop(op, y, x))
-                      fi
+                      addSubMulCommonCode("+", x, y) <+ Binop("-", L(1), x)
+                    elif compare(op, "-") == 0 then
+                      addSubMulCommonCode("-", x, y) <+ Binop("+", L(1), x)
+                    elif compare(op, "*") == 0 then
+                      singletonBuffer(Sar1(x)) <+ Sar1(y) <+> addSubMulCommonCode("*", x, y) <+> toFixedNum(x)
                     elif compare(op, "/") == 0 !! compare(op, "%") == 0 then
-                      singletonBuffer(Mov(x, eax)) <+ Cltd <+ IDiv(y) <+
-                        Mov(if compare(op, "/") == 0 then eax else edx fi, x)
+                      singletonBuffer(Sar1(x)) <+ Sar1(y) <+ Mov(x, eax) <+ Cltd <+ IDiv(y) <+
+                        Mov(if compare(op, "/") == 0 then eax else edx fi, x) <+> toFixedNum(x)
                     elif compare(op, "<") == 0 !! compare(op, ">") == 0 !! compare(op, "<=") == 0 !!
                       compare(op, ">=") == 0 !! compare(op, "==") == 0 !! compare(op, "!=") == 0 then
                       singletonBuffer(Binop("^", eax, eax)) <+>
-                        if memOpnd(x) && memOpnd(y)
+                        if memOpnd(x)
                           then singletonBuffer(Mov(x, edx)) <+ Binop("cmp", y, edx)
                           else singletonBuffer(Binop("cmp", y, x))
-                        fi <+ Set(suffix(op), "%al") <+ Mov(eax, x)
+                        fi <+ Set(suffix(op), "%al") <+ Mov(eax, x) <+> toFixedNum(x)
                     elif compare(op, "&&") == 0 !! compare(op, "!!") == 0 then
                       emptyBuffer() <+
-                        Mov(x, eax) <+ Binop("&&", eax, eax) <+ Mov(L(0), eax) <+ Set(suffix("!="), "%al") <+
-                        Mov(y, edx) <+ Binop("&&", edx, edx) <+ Mov(L(0), edx) <+ Set(suffix("!="), "%dl") <+
-                        Binop(op, edx, eax) <+ Mov(eax, x)
+                        Sar1(x) <+ Mov(x, eax) <+ Binop("&&", eax, eax) <+ Mov(L(0), eax) <+ Set(suffix("!="), "%al") <+
+                        Sar1(y) <+ Mov(y, edx) <+ Binop("&&", edx, edx) <+ Mov(L(0), edx) <+ Set(suffix("!="), "%dl") <+
+                        Binop(op, edx, eax) <+ Mov(eax, x) <+> toFixedNum(x)
                     else failure("unknown BINOP: %s\n", op)
                   fi
                 ]
@@ -534,20 +546,19 @@ fun compile(env, code) {
                 case pushArgs(env, emptyBuffer(), n) of
                   [env, pushElemsCode] ->
                     case allocate(env) of
-                      [s, env] ->
-                        [env, code <+> pushRegsCode <+ Push(L(tagHash(x))) <+> pushElemsCode <+ Push(L(n + 1)) <+ Call("Bsexp") <+ Binop("+", L(wordSize * (n + 2)), esp) <+> popRegsCode <+ Mov(eax, s)]
+                      [s, env] -> [env, code <+>
+                        pushRegsCode <+ Push(L(makeBox(tagHash(x)))) <+> pushElemsCode <+ Push(L(makeBox(n + 1))) <+
+                        Call("Bsexp") <+ Binop("+", L(wordSize * (n + 2)), esp) <+> popRegsCode <+ Mov(eax, s)
+                      ]
                     esac
                 esac
             esac
-          | CONST (n)            ->
-            case allocate(env) of
-              [s, env] -> [env, code <+ Mov(L(n), s)]
-            esac
+          | CONST (n)            -> case allocate(env) of [s, env] -> [env, code <+ Mov(L(makeBox(n)), s)] esac
           | LABEL (l)            -> [if isBarrier(env) then retrieveStack(env, l) else env fi, code <+ Label(l)]
           | JMP (l)              -> [setBarrier(env), code <+ Jmp(l)]
           | CJMP (cnd, l)        ->
             case pop(env) of
-              [x, env] -> [setStack(env, l), code <+ Binop("cmp", L(0), x) <+ CJmp(cnd, l)]
+              [x, env] -> [setStack(env, l), code <+ Sar1(x) <+ Binop("cmp", L(0), x) <+ CJmp(cnd, l)]
             esac
           | CALL (fLab, na)      ->
             case saveRegs(env, na) of
@@ -555,7 +566,10 @@ fun compile(env, code) {
                 case pushArgs(env, emptyBuffer(), na) of
                   [env, pushArgsCode] ->
                     case allocate(env) of
-                      [x, env] -> [env, code <+> pushRegsCode <+> pushArgsCode <+ Call(fLab) <+ Binop("+", L(wordSize * na), esp) <+> popRegsCode <+ Mov(eax, x)]
+                      [x, env] -> [env, code <+>
+                        pushRegsCode <+> pushArgsCode <+ Call(fLab) <+ Binop("+", L(wordSize * na), esp) <+>
+                        popRegsCode <+ Mov(eax, x)
+                      ]
                     esac
                 esac
             esac
@@ -564,6 +578,11 @@ fun compile(env, code) {
           | END                  ->
             case epilogue(env) of
               [env, endCode] -> [env, code <+> endCode]
+            esac
+          | DUP                  ->
+            var x = peek(env);
+            case allocate(env) of
+              [s, env] -> [env, code <+ if memOpnd(x) then Mov(x, eax) <+ Mov(eax, s) else Mov(x, s) fi]
             esac
           | DROP                 ->
             case pop(env) of
@@ -585,8 +604,10 @@ fun compile(env, code) {
                 case pushArgs(env, emptyBuffer(), n) of
                   [env, pushElemsCode] ->
                     case allocate(env) of
-                      [s, env] ->
-                        [env, code <+> pushRegsCode <+> pushElemsCode <+ Push(L(n)) <+ Call("Barray") <+ Binop("+", L(wordSize * (n + 1)), esp) <+> popRegsCode <+ Mov(eax, s)]
+                      [s, env] -> [env, code <+>
+                        pushRegsCode <+> pushElemsCode <+ Push(L(makeBox(n))) <+ Call("Barray") <+
+                        Binop("+", L(wordSize * (n + 1)), esp) <+> popRegsCode <+ Mov(eax, s)
+                      ]
                     esac
                 esac
             esac
