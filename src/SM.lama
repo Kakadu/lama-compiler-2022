@@ -572,80 +572,6 @@ public fun compileSM (stmt) {
                 esac
             esac
         esac
-      | Seq   (s1, s2)       ->
-        case genLabel (env) of
-          [s2Lab, env] -> case compile (s2Lab, env, s1) of
-                            [s2LabUsed, env, s1Code] ->
-                              case compile (lab, env, s2) of
-                                [labUsed, env, s2Code] -> [labUsed, env, s1Code <+> label (s2Lab, s2LabUsed) <+> s2Code]
-                              esac
-                          esac
-        esac
-      | While (cond, body)   ->
-        case genLabels (env, 3) of
-          [condLab, bodyLab, cjmpLab, env] ->
-            case compile (condLab, env, body) of
-              [_, env, bodyCode] ->
-                case compile (cjmpLab, env, cond) of
-                  [cjmpLabUsed, env, condCode] ->
-                    [
-                      false,
-                      env,
-                      singletonBuffer (JMP (condLab))
-                        <+ LABEL (bodyLab)
-                        <+> bodyCode
-                        <+ LABEL (condLab)
-                        <+> condCode
-                        <+> label (cjmpLab, cjmpLabUsed)
-                        <+ CJMP ("nz", bodyLab)
-                    ]
-                esac
-            esac
-        esac
-      | DoWhile (body, cond) ->
-        case genLabels (env, 3) of
-          [condLab, bodyLab, cjmpLab, env] ->
-            case compile (condLab, env, body) of
-              [condLabUsed, env, bodyCode] ->
-                case compile (cjmpLab, env, cond) of
-                  [cjmpLabUsed, env, condCode] ->
-                    [
-                      false,
-                      env,
-                      singletonBuffer (LABEL (bodyLab))
-                        <+> bodyCode
-                        <+> label (condLab, condLabUsed)
-                        <+> condCode
-                        <+> label (cjmpLab, cjmpLabUsed)
-                        <+ CJMP ("nz", bodyLab)
-                    ]
-                esac
-            esac
-        esac
-      | If (cond, body, el)  ->
-        case genLabels (env, 2) of
-          [cjmpLab, elseLab, env] ->
-            case compile (cjmpLab, env, cond) of
-              [cjmpLabUsed, env, condCode] ->
-                case compile (lab, env, body) of
-                  [_, env, mainCode] ->
-                    case compile (lab, env, el) of
-                      [_, env, elseCode] ->
-                        [
-                          true,
-                          env,
-                          condCode
-                            <+> label (cjmpLab, cjmpLabUsed)
-                            <+ CJMP ("z", elseLab)
-                            <+> mainCode
-                            <+ JMP (lab)
-                            <+ LABEL (elseLab)
-                            <+> elseCode
-                        ]
-                    esac
-                esac
-            esac
-        esac
       | Ignore (e)           ->
         case genLabel (env) of
           [lab, env] ->
@@ -687,19 +613,6 @@ public fun compileSM (stmt) {
                                                                                     esac
                                                    esac
                                 esac
-      | Binop (op, l, r)     ->
-        case genLabels (env, 2) of
-          [rLab, opLab, env] ->
-            case compile (rLab, env, l) of
-              [rLabUsed, env, lCode] ->
-                case compile (opLab, env, r) of
-                  [opLabUsed, env, rCode] ->
-                    [false, env, lCode <+> label (rLab, rLabUsed) <+> rCode <+> label (opLab, opLabUsed) <+ BINOP (op)]
-                esac
-            esac
-        esac
-
-      | Set (x, e)           -> compile (lab, env, Assn (Ref (x), e))
       | String (x)           -> [false, env, singletonBuffer (STRING (x))]
       | Array (xs)           ->
         case env.genLabel of
