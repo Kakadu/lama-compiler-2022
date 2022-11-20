@@ -47,7 +47,7 @@ public fun evalOp (op, l, r) {
 --        if      (expr, expr, expr)   |
 --        While   (expr, expr)         |
 --        DoWhile (expr, expr)         |
---        Var     (string)             |
+--        Val     (string)             |
 --        Ref     (string)             |
 --        Const   (int)                |
 --        Binop   (string, expr, expr) |
@@ -63,7 +63,7 @@ public fun evalOp (op, l, r) {
 -- a given state
 fun lookupVal (state, name) {
   case state.lookup (name) of
-    x@Val (_) -> x
+    x@Val (y) -> y
   | _         -> error (sprintf ("the name ""%s"" does not designate a variable", name), getLoc (name))
   esac
 }
@@ -102,7 +102,125 @@ fun evalList (c, exprs) {
 }
 
 fun eval (c@[s, w], expr) {
-  failure ("evalExpr not implemented\n")
+  case expr of
+    Const (n)        -> [c, n]
+  | Var (x)          -> [c, lookupVal(s, x)]
+  | Ref (x)          -> lookupVal(s, x); [c, Ref (x)]
+  | Scope (ds, e)    -> (
+    var newScope = foldl(fun (s, def) {
+        case def of
+          Var (x)                -> addNames (s, x)
+        | Fun (name, args, body) -> addFunction (s, name, args, body)
+        esac
+    }, enterScope(s), ds);
+    var result = eval([newScope, w], e);
+    case result of
+        [[newScope, w], v] -> [[leaveScope(newScope), w], v]
+    esac
+  )
+  | Call (name, args) -> (
+    case lookup(s, name) of
+      Fun (_, External) -> eval (c, Builtin (name, args))
+    | Fun (funArgs, body) -> (
+        if funArgs.size != args.size
+        then error (sprintf ("the function ""%s"" was called with ""%d"" parameters, expected ""%d""", name, funArgs.size, args.size), getLoc (name))
+        fi;
+        case evalList(c, args) of
+          [[s, w], evaluatedArgs] -> (
+            var fState = foldl(fun (s, [x, v]) { addName(s, x, Val (v)) }, enterFunction(s), zip (funArgs, evaluatedArgs));
+            case eval ([fState, w], body) of
+              [[fState, w], v] -> [[leaveFunction(s, getGlobal(fState)), w], v]
+            esac
+          )
+        esac
+      )
+    esac
+  )
+  | Ignore (e)       -> case eval(c, e) of [c, _] -> [c, None] esac
+  | Binop (op, l, r) -> (
+        case eval (c, l) of
+            [c, lvalue] -> case eval (c, r) of
+                  [c, rvalue] -> [c, evalOp (op, lvalue, rvalue)]
+                | _ -> failure ("Should not reach")
+            esac
+            | _ -> failure ("Should not reach")
+        esac
+    )
+  | Skip             -> [c, None]
+  | Set(x, e)        -> eval (c, Assn (Ref (x), e))
+  | Assn (l, r)      -> (
+        case eval (c, l) of
+              [c, Ref (x)] -> case eval (c, r) of
+                  [[s, w], v] -> [[s <- [x, Val (v)], w], v]
+                | _ -> failure ("Should not reach")
+              esac
+            | [c, ElemRef (arr, index)] -> case eval (c, r) of
+                [[s, w], v] -> arr[index] := v; [[s, w], v]
+              | _ -> failure ("Should not reach")
+              esac
+        esac
+  )
+  | Seq (e1, e2)     -> (
+        case eval (c, e1) of
+            [c, _] -> eval (c, e2)
+        esac
+    )
+  | If (cond, thenB, elseB) -> (
+        case eval (c, cond) of
+              [c, v] -> if v then eval (c, thenB) else eval (c, elseB) fi
+            | _ -> failure ("Should not reach")
+        esac
+    )
+  | While (cond, body)      -> (
+        case eval (c, cond) of
+              [c, v] ->
+              if v
+              then case eval (c, body) of [c, _] -> eval (c, expr) esac
+              else [c, None]
+              fi
+            | _ -> failure ("Should not reach")
+        esac
+    )
+  | DoWhile (body, cond)    -> (
+        case eval (c, body) of
+            [c, _] -> eval (c, While (cond, body))
+        esac
+  )
+  | Array (exprs) -> (
+        case evalList(c, exprs) of
+            [c, arr] -> [c, listArray(arr)]
+        esac
+  )
+  | Elem (arrExpr, indexExpr) -> (
+        case eval (c, arrExpr) of
+            [c, arr] -> case eval (c, indexExpr) of
+                [c, index] -> case arr of
+                      Sexp (_, arr) -> [c, arr[index]]
+                    | _ -> [c, arr[index]]
+                esac
+            esac
+        esac
+  )
+  | ElemRef (arrExpr, indexExpr) -> (
+        case eval (c, arrExpr) of
+            [c, arr] -> case eval (c, indexExpr) of
+                [c, index] -> case arr of
+                      Sexp (_, arr) -> [c, ElemRef (arr, index)]
+                    | _ -> [c, ElemRef (arr, index)]
+                esac
+            esac
+        esac
+  )
+  | Builtin (name, args) -> (
+        case evalList (c, args) of
+            [c, evaluatedArgs] -> case evalBuiltin (name, evaluatedArgs, w) of
+                [v, newWorld] -> [[s, newWorld], v]
+            esac
+        esac
+  )
+  | String (x)      -> [c, x]
+  | Sexp(name, xs)  -> case evalList (c, xs) of [c, vs] -> [c, Sexp (name, listArray (vs))] esac
+  esac
 }
 
 
