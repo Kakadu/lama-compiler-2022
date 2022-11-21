@@ -147,7 +147,36 @@ var primary    = memo $ eta syntax (
                                                                                                                                                       None        -> {}
                                                                                                                                                     | Some (args) -> args
                                                                                                                                                     esac), loc)}} |
-                                      $(failure ("the rest of primary parsing in not implemented\n"))),
+
+                                        e=inbr[s ("("), exp, s (")")]                   { e }
+                                      | loc=pos kSkip                                   { fun (a) { assertVoid (a, Skip, loc) } } 
+                                      | loc=pos kRead x=inbr[s ("("), lident, s (")")]  { fun (a) { assertVoid (a, Read (x), loc) } }
+                                      | loc=pos kWrite e=inbr[s ("("), exp, s (")")]    { fun (a) { assertVoid (a, Write (e (Val)), loc) } }
+                                      | loc=pos kIf el=elseItem                               { fun (a) { el (a) } }
+                                      | loc=pos kWhile cond=exp kDo body=scopeExpr kOd        { fun (a) { assertVoid (a, While (cond (Val), body (Void)), loc) } }
+                                      | loc=pos kDo body=scopeExpr kWhile cond=scopeExpr kOd  { fun (a) {
+                                                                                                distributeScope (
+                                                                                                  body (Void),
+                                                                                                  fun (body) {  
+                                                                                                    assertVoid (a, DoWhile (body, cond (Val)), loc) 
+                                                                                                  } 
+                                                                                                )}
+                                                                                              }
+                                      | loc=pos kFor decl=scopeExpr s[","] cond=exp s[","] succ=exp kDo body=scopeExpr kOd
+                                                                                              { fun (a) {
+                                                                                                distributeScope (
+                                                                                                  decl (Void),
+                                                                                                  fun (decl) {
+                                                                                                    assertVoid (a, 
+                                                                                                                Seq (decl, 
+                                                                                                                      While (cond (Val), 
+                                                                                                                        Seq (body (Void), succ (Void)))), 
+                                                                                                                loc)
+                                                                                                  }
+                                                                                                )} 
+                                                                                              }
+                                    ),
+
       basic      = memo $ eta (expr ({[Right, {[s (":="),
                                                 fun (l, loc, r) {
                                                   fun (a) {assertValue (a, Assn (l (Ref), r (Val)), loc)}
@@ -190,6 +219,17 @@ var primary    = memo $ eta syntax (
                                       }
                                      ),                                    
       exp        = memo $ eta syntax (basic | s1=basic s[";"] s2=exp {fun (a) {Seq (s1 (Void), s2 (a))}});
+
+var elseItem = memo $ eta syntax (
+  cond=exp kThen body=scopeExpr
+  end = (
+      kElif el=elseItem { fun (a) { If (cond (Val), body (a), el (a)) } }
+    | kElse el=scopeExpr kFi  { fun (a) { If (cond (Val), body (a), el (a)) } }
+    | kFi               { fun (a) { assertVoid (a, If (cond (Val), body (Void), Skip), loc) } }
+  )
+
+  { end }
+);
 
 -- Public top-level parser
 public parse = syntax (s=scopeExpr {s (Void)});
