@@ -57,7 +57,8 @@ public fun evalOp (op, l, r) {
 --        Array   (expr list)          |
 --        Elem    (expr, expr)         |
 --        ElemRef (expr, expr)         |
---        Builtin (string, expr list)
+--        Builtin (string, expr list)  |
+--        Sexp    (string, expr list)
 
 -- Helper function: checks that given name designates a regular variable in
 -- a given state
