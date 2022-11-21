@@ -557,17 +557,14 @@ fun compile (env, code) {
             var liveRegs = liveRegisters (env, nArgs);
             var pushLiveRegs = listBuffer (map (fun (reg) { Push (reg) }, liveRegs));
             var popLiveRegs = listBuffer (reverse (map (fun (reg) { Pop (reg) }, liveRegs)));
-            fun pushArgs (env, n) {
-              fun helper (env, n, prefix) {
-                if n == 0 then [env, prefix]
-                  else case pop (env) of
-                    [s, env] -> helper (env, n - 1, prefix <+ Push (s))
-                  esac
-                fi
-              }
-              helper (env, n, emptyBuffer ())
+            fun pushArgs (env, n, code) { 
+              if n == 0 then [env, code]
+                else case pop (env) of
+                  [s, env] -> pushArgs (env, n - 1, code <+ Push (s))
+                esac
+              fi
             }
-            case pushArgs (env, nArgs) of
+            case pushArgs (env, nArgs, emptyBuffer ()) of
               [env, pushArgs] ->
                 case allocate (env) of
                   [s, env] -> [env,
