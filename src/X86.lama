@@ -457,7 +457,10 @@ fun compile (env, code) {
     foldl (
       fun ([env, scode], i) {
         fun saveRegs(env, depth) {
-          foldl(fun ([pushes, pops], r) { [pushes <+ Push(r), singletonBuffer(Pop(r)) <+> pops] }, [emptyBuffer(), emptyBuffer()], liveRegisters(env, depth))
+          foldl(fun ([pushes, pops], r) {
+            [pushes <+ Push(r),
+              singletonBuffer(Pop(r)) <+> pops]
+          }, [emptyBuffer(), emptyBuffer()], liveRegisters(env, depth))
         }
 
         fun pushArgs(env, pushArgsCode, n) {
@@ -525,8 +528,7 @@ fun compile (env, code) {
             esac
           | CALL (fLab, na)      ->
             case saveRegs(env, na) of
-              [pushRegsCode, popRegsCodeList] ->
-                var popRegsCode = listBuffer(popRegsCodeList);
+              [pushRegsCode, popRegsCode] ->
                 case pushArgs(env, emptyBuffer(), na) of
                   [env, pushArgsCode] ->
                     case allocate(env) of
@@ -537,7 +539,7 @@ fun compile (env, code) {
                           <+ Call(fLab)
                           <+ Binop("+", L(wordSize * na), esp)
                           <+> popRegsCode
-                          <+ Mov(eax, x)]
+                          <+> move(eax, x)]
                     esac
                 esac
             esac
@@ -547,15 +549,18 @@ fun compile (env, code) {
               [env, endCode] -> [env, code <+> endCode]
             esac
           | SEXP (x, n)          ->
-            case saveRegs(env, 0) of
-              [pushRegsCode, popRegsCode] ->
                 case pushArgs(env, emptyBuffer(), n) of
                   [env, pushElemsCode] ->
                     case allocate(env) of
                       [s, env] ->
-                        [env, code <+> pushRegsCode <+ Push(L(tagHash(x))) <+> pushElemsCode <+ Push(L(n + 1)) <+ Call("Bsexp") <+ Binop("+", L(wordSize * (n + 2)), esp) <+> popRegsCode <+ Mov(eax, s)]
+                        [env, code
+                          <+ Push(L(tagHash(x)))
+                          <+> pushElemsCode
+                          <+ Push(L(n + 1))
+                          <+ Call("Bsexp")
+                          <+ Binop("+", L(wordSize * (n + 2)), esp)
+                          <+> move(eax, s)]
                     esac
-                esac
             esac
           | STRING (x)           ->
             case addString(env, x) of
@@ -568,15 +573,17 @@ fun compile (env, code) {
                 esac
             esac
           | ARRAY (n)            ->
-            case saveRegs(env, 0) of
-              [pushRegsCode, popRegsCode] ->
                 case pushArgs(env, emptyBuffer(), n) of
                   [env, pushElemsCode] ->
                     case allocate(env) of
                       [s, env] ->
-                        [env, code <+> pushRegsCode <+> pushElemsCode <+ Push(L(n)) <+ Call("Barray") <+ Binop("+", L(wordSize * (n + 1)), esp) <+> popRegsCode <+ Mov(eax, s)]
+                        [env, code
+                          <+> pushElemsCode
+                          <+ Push(L(n))
+                          <+ Call("Barray")
+                          <+ Binop("+", L(wordSize * (n + 1)), esp)
+                          <+> move(eax, s)]
                     esac
-                esac
             esac
           | STA                  -> case compile(env, { CALL("Bsta", 3) }) of [env, callCode] -> [env, code <+> callCode] esac
           | ELEM                 -> case compile(env, { CALL("Belem", 2) }) of [env, callCode] -> [env, code <+> callCode] esac

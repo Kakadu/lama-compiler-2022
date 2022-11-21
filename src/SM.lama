@@ -665,7 +665,10 @@ public fun compileSM (stmt) {
         case genLabel (env) of
           [elemLab, env] ->
             case compile (elemLab, env, ElemRef (arr, i)) of
-              [elemLabUsed, env, code] -> [false, env, code <+> label (elemLab, elemLabUsed) <+ ELEM]
+              [elemLabUsed, env, code] -> [false, env, code
+                <+> label (elemLab, elemLabUsed)
+                <+ ELEM
+              ]
             esac
         esac
       | ElemRef (arr, i) ->
@@ -674,20 +677,25 @@ public fun compileSM (stmt) {
             case compile (iLab, env, arr) of
               [iLabUsed, env, arrCode] ->
                 case compile (lab, env, i) of
-                  [labUsed, env, iCode] -> [labUsed, env, arrCode <+> label (iLab, iLabUsed) <+> iCode]
+                  [labUsed, env, iCode] -> [labUsed, env, arrCode
+                    <+> label (iLab, iLabUsed)
+                    <+> iCode
+                  ]
                 esac
             esac
         esac
       | Builtin (f, as) ->
         case lookupFun (env, f) of
-          Fun (fLab, nArgs) -> [false, env, singletonBuffer (BUILTIN (substring (fLab, 1, length (fLab) - 1), nArgs))]
+          Fun (fLab, nArgs) -> [false, env, singletonBuffer $ BUILTIN (substring (fLab, 1, length (fLab) - 1), nArgs)]
         esac
       | String (string) -> [false, env, singletonBuffer (STRING (string))]
       | Set (x, e) ->
         case genLabel (env) of
           [setLab, env] ->
             case compile (setLab, env, e) of
-              [setLabUsed, env, code] -> [false, env, code <+> label (setLab, setLabUsed) <+ ST (lookupVar (env, x))]
+              [setLabUsed, env, code] -> [false, env, code
+                <+> label (setLab, setLabUsed)
+                <+ ST (lookupVar (env, x))]
             esac
         esac
       | Sexp (x, es) ->
@@ -698,7 +706,9 @@ public fun compileSM (stmt) {
               Skip,
               es
             )) of
-              [sexpLabUsed, env, elmsCode] -> [false, env, elmsCode <+> label (sexpLab, sexpLabUsed) <+ SEXP (x, size (es))]
+              [sexpLabUsed, env, elmsCode] -> [false, env, elmsCode
+                <+> label (sexpLab, sexpLabUsed)
+                <+ SEXP (x, size (es))]
             esac
         esac
     esac
