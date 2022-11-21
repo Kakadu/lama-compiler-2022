@@ -743,8 +743,17 @@ public fun compileSM (stmt) {
                                 .addFun ("write" , "$write" , 1)
                                 .addFun ("length", "$length", 1).genLabel of
     [endLab, env] ->
-       case compile (endLab, env, stmt) of
-         [endLabUsed, _, code] -> getBuffer $ code <+> label (endLab, endLabUsed) 
-       esac
+      case compile (endLab, env, stmt) of
+        [endLabUsed, env, code] ->
+          getBuffer $
+            listBuffer ({
+              LABEL ("main"),
+              BEGIN ("main", 0, getLocals (env))
+            })
+            <+> code
+            <+> label (endLab, endLabUsed)
+            <+ END
+            <+> compileFuns (env)
+      esac
   esac
 }
