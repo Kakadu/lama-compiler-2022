@@ -453,26 +453,25 @@ fun compile (env, code) {
       | _  -> true
     esac
   }
+  fun saveRegs(env, depth) {
+    foldl(fun ([pushes, pops], r) {
+      [pushes <+ Push(r),
+        singletonBuffer(Pop(r)) <+> pops]
+    }, [emptyBuffer(), emptyBuffer()], liveRegisters(env, depth))
+  }
+
+  fun pushArgs(env, pushArgsCode, n) {
+    if n == 0
+      then [env, pushArgsCode]
+      else
+        case pop(env) of
+          [x, env] -> pushArgs(env, pushArgsCode <+ Push(x), n - 1)
+        esac
+    fi
+  }
   fun compile (env, code) {
     foldl (
       fun ([env, scode], i) {
-        fun saveRegs(env, depth) {
-          foldl(fun ([pushes, pops], r) {
-            [pushes <+ Push(r),
-              singletonBuffer(Pop(r)) <+> pops]
-          }, [emptyBuffer(), emptyBuffer()], liveRegisters(env, depth))
-        }
-
-        fun pushArgs(env, pushArgsCode, n) {
-          if n == 0
-            then [env, pushArgsCode]
-            else
-              case pop(env) of
-                [x, env] -> pushArgs(env, pushArgsCode <+ Push(x), n - 1)
-              esac
-          fi
-        }
-
         var code = scode <+ Meta ("# " ++ showSMInsn (i) ++ "\n");
         case i of
             CONST (n)  ->
