@@ -156,8 +156,6 @@ var primary    = memo $ eta syntax (
                                                                                                                                                     | Some (args) -> args
                                                                                                                                                     esac), loc)}} |            
                                   e = inbr[s("("), scopeExpr, s(")")] {e} |
-                                  loc = pos kRead x=inbr[s("("), lident, s(")")] { fun(a) {assertVoid(a, Read(x), loc)} } |
-                                  loc = pos kWrite e=inbr[s("("), exp, s(")")] { fun(a) {assertVoid(a, Write(e (Val)), loc)} } |
                                   loc = pos kSkip { fun(a) {assertVoid(a, Skip, loc)} } |
                                   loc=pos kWhile cond=exp kDo body=scopeExpr kOd { fun(a) {assertVoid (a, While (cond (Val), body (Void)), loc)} } |
                                   loc=pos kDo body=scopeExpr kWhile cond=exp kOd  
