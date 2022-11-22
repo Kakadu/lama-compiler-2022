@@ -30,7 +30,7 @@ var ops = {
 -- and two operand values, and returns the result
 public fun evalOp (op, l, r) {
   case assoc (ops, op) of
-    Some (f) -> f (l, r)
+  Some (f) -> f (l, r)
   esac
 }
 
@@ -86,31 +86,136 @@ fun addNames (state, names) {
 fun addFunction (state, name, args, body) {
   state.addName (name, Fun (args, body))
 }
-                                        
+
 -- Evaluates a list of expressions, properly threading a configurations.
 -- Returns the final configuration and the list of values
 fun evalList (c, exprs) {
   case foldl (fun ([c, vals], e) {
-                case eval (c, e) of
-                  [c, v] -> [c, v : vals]
-                esac
-              },
-              [c, {}],
-              exprs) of
-    [c, vals] -> [c, reverse (vals)]
+    case eval (c, e) of
+    [c, v] -> [c, v : vals]
+    esac
+  },
+    [c, {}],
+    exprs) of
+  [c, vals] -> [c, reverse (vals)]
   esac
 }
 
 fun eval (c@[s, w], expr) {
-  failure ("evalExpr not implemented\n")
+  case expr of
+    Assn (l, r)      ->
+      case evalList (c, {l, r}) of
+        [c, {ElemRef(arr, i), v}] -> [c, arr[i] := v]
+      | [[s, w], {Ref (x), v}]    ->
+        lookupVal (s, x);
+        [[s <- [x, Val (v)], w], v]
+      esac
+  | Seq (s1, s2)     ->
+    case evalList (c, {s1, s2}) of
+    [c, {_, v}] -> [c, v]
+    esac
+  | Skip             -> [c, 0]
+  | If (e, s1, s2)   ->
+    case eval (c, e) of
+    [c, cond] -> eval (c, if cond then s1 else s2 fi)
+    esac
+  | While (e, s)     ->
+    case eval (c, e)of
+    [c, cond] -> if cond then case eval (c, s) of [c, 0] -> eval (c, expr) esac else [c, 0] fi
+    esac
+  | DoWhile (s, e)   ->
+    case eval (c, s) of
+    [c, 0] -> eval (c, While (e, s))
+    esac
+  | Var (x)          -> [c, case lookupVal (s, x) of Val(v) -> v esac]
+  | Ref (x)          -> lookupVal (s, x); [c, Ref (x)]
+  | Const (n)        -> [c, n]
+  | Binop (op, l, r) ->
+    case evalList (c, {l, r}) of
+    [c, {l, r}] -> [c, evalOp (op, l, r)]
+    esac
+  | Ignore (e)       ->
+    case eval (c, e) of
+    [c, _] -> [c, 0]
+    esac
+  | Scope (defs, e)  ->
+    case eval ([foldl (fun (s, def) {case def of
+      Var (names)              -> addNames (s, names)
+    | Fun (name, params, body) -> addFunction (s, name, params, body)
+    esac
+    }, enterScope (s), defs), w], e) of
+    [[s, w], v] -> [[leaveScope (s), w], v]
+    esac
+  | Call (f, args)   ->
+    case lookupFun (s, f) of
+      Fun (_, External)  -> eval (c, Builtin (f, args))
+    | Fun (params, body) ->
+      if size (args) != size (params) then
+        error (sprintf ("expected %d arguments for function ""%s"", but found %d", size (params), f, size (args)), getLoc (f))
+      fi;
+      case evalList (c, args) of
+      [[s, w], args] ->
+        case eval ([foldl (fun (s, [param, arg]) {addName (s, param, Val (arg))}, enterFunction (s), zip (params, args)), w], body) of
+        [[s2, w], v] -> [[leaveFunction (s, getGlobal (s2)), w], v]
+        esac
+      esac
+    esac
+  | Array(es)        ->
+    case evalList (c, es) of
+    [c, vs] -> [c, listArray (vs)]
+    esac
+  | Elem(arr, i)     ->
+    case evalList (c, {arr, i}) of
+    [c, {arr, i}] -> [
+      c,
+      (case arr of
+        arr@#array   -> arr
+      | Sexp(_, arr) -> arr
+      | arr@#str     -> arr esac
+      )[i]
+    ]
+    esac
+  | ElemRef(arr, i)  ->
+    case evalList (c, {arr, i}) of
+    [c, {arr, i}] -> [
+      c,
+      ElemRef (
+        case arr of
+          arr@#array   -> arr
+        | Sexp(_, arr) -> arr
+        | arr@#str     -> arr esac,
+        i)
+    ]
+    esac
+  | String(string)   -> [c, string]
+  | Builtin(f, args) ->
+    case evalList (c, args) of
+    [[s, w], args] ->
+      case evalBuiltin (f, args, w) of
+      [v, w] -> [[s, w], v]
+      esac
+    esac
+  | Set(x, e)        ->
+    case eval (c, e) of
+    [[s, w], v] -> [[s <- [x, Val (v)], w], v]
+    esac
+  | Sexp(x, es)      ->
+    case evalList (c, es) of
+    [c, vs] -> [c, Sexp (x, listArray (vs))]
+    esac
+  esac
 }
 
 
 -- Evaluates a program with a given input and returns an output
 public fun evalExpr (input, expr) {
-  case eval ([emptyState ().enterScope.addName ("read",   Fun ({}, External))
-                                      .addName ("write",  Fun ({"a"}, External))
-                                      .addName ("length", Fun ({"a"}, External)), createWorld (input)], expr) of
-    [c, _] -> c.snd.getOutput
+  case eval ([addName (
+    addName (
+      addName (enterScope (emptyState ()), "read", Fun ({}, External)),
+      "write", Fun ({"a"}, External)
+    ),
+    "length", Fun ({"a"}, External)
+  ), createWorld (input)], expr) of
+  [c, _] -> getOutput (snd (c))
   esac
 }
