@@ -473,21 +473,28 @@ fun compileBinopX86(x,y,s,op) {
 -- Compiles stack machine code into a list of x86 instructions. Takes an environment
 -- and stack machine code, returns an updated environment and x86 code.
 fun compile (env, code) {  
+
+  fun pushLiveRegs (env, depth) {
+    foldl (fun (code, reg) {code <+ Push (reg)}, emptyBuffer (), liveRegisters (env, depth))
+  }
+
+  fun popLiveRegs (env, depth) {
+    foldr (fun (code, reg) {code <+ Pop (reg)}, emptyBuffer (), liveRegisters (env, depth))
+  }
+
+  fun pushArgs (env, n, code) {
+    if n then case pop(env) of [s, env] -> pushArgs (env, n - 1, code <+ Push (s)) esac
+    else [env, code]
+    fi
+  }
+
   fun compile (env, code) {
     foldl (
       fun ([env, scode], i) {
         var code = scode <+ Meta ("# " ++ showSMInsn (i) ++ "\n");
 
         case i of
-          READ ->
-            case env.allocate of
-              [s, env] -> [env, code <+ Call ("Lread") <+ Mov (eax, s)]
-            esac             
-        | WRITE ->
-            case env.pop of
-              [s, env] -> [env, code <+ Push (s) <+ Call ("Lwrite") <+ Pop (eax)]
-            esac
-        | CONST (c) -> 
+         CONST (c) -> 
           case allocate(env) of
             [s, env] -> [env, code <+> move(L(c), s)]
           esac
@@ -534,26 +541,18 @@ fun compile (env, code) {
          -- 5. restore saved live registers.
          --
         | CALL (f, nArgs) ->
-            var liveRegs = liveRegisters (env, nArgs);
-            var pushLiveRegs = listBuffer (map (fun (reg) { Push (reg) }, liveRegs));
-            var popLiveRegs = listBuffer (reverse (map (fun (reg) { Pop (reg) }, liveRegs)));
-            fun pushArgs (env, n, code) { 
-              if n == 0 then [env, code]
-                else case pop (env) of
-                  [s, env] -> pushArgs (env, n - 1, code <+ Push (s))
-                esac
-              fi
-            }
+            var pushLiveRegsCode = pushLiveRegs (env, nArgs);
+            var popLiveRegsCode = popLiveRegs (env, nArgs);
             case pushArgs (env, nArgs, emptyBuffer ()) of
-              [env, pushArgs] ->
+              [env, pushArgsCode] ->
                 case allocate (env) of
                   [s, env] -> [env,
-                    code
-                      <+> pushLiveRegs
-                      <+> pushArgs
+                          code
+                      <+> pushLiveRegsCode
+                      <+> pushArgsCode
                       <+ Call (f)
                       <+ Binop ("+", L (nArgs * wordSize), esp)
-                      <+> popLiveRegs
+                      <+> popLiveRegsCode
                       <+> move (eax, s)
                   ]
                 esac
@@ -569,7 +568,68 @@ fun compile (env, code) {
             case epilogue (env) of 
               [env, epilogueCode] -> [env, code <+> epilogueCode]
             esac
-          | GLOBAL (x) -> [addGlobal (env, x), code]       
+          | GLOBAL (x) -> [addGlobal (env, x), code]   
+          | ARRAY (n) ->
+            var pushLiveRegsCode = pushLiveRegs (env, 0);
+            var popLiveRegsCode = popLiveRegs (env, 0);
+            case pushArgs (env, n, emptyBuffer()) of
+              [env, pushElmsCode] ->
+                case allocate (env) of
+                  [s, env] ->
+                    [env,
+                      code
+                        <+> pushLiveRegsCode
+                        <+> pushElmsCode
+                        <+ Push (L (n))
+                        <+ Call ("Barray")
+                        <+ Binop ("+", L ((n + 1) * wordSize), esp)
+                        <+> popLiveRegsCode
+                        <+> move (eax, s)
+                    ]
+                esac
+            esac 
+          | SEXP (x, n) ->
+            var pushLiveRegsCode = pushLiveRegs (env, 0);
+            var popLiveRegsCode = popLiveRegs (env, 0);
+            case pushArgs (env, n, emptyBuffer()) of
+              [env, pushElmsCode] ->
+                case allocate (env) of
+                  [s, env] ->
+                    [env,
+                      code
+                        <+> pushLiveRegsCode
+                        <+ Push (L (tagHash (x)))
+                        <+> pushElmsCode
+                        <+ Push (L (n + 1))
+                        <+ Call ("Bsexp")
+                        <+ Binop ("+", L ((n + 2) * wordSize), esp)
+                        <+> popLiveRegsCode
+                        <+> move (eax, s)
+                    ]
+                esac
+              esac
+          | STRING (strng) ->
+            case addString (env, strng) of
+              [env, sName] ->
+                case allocate (env) of
+                  [s, env] ->
+                    case compile (env, { CALL ("Bstring", 1) }) of
+                      [env, callCode] -> [env, code <+ Lea (M (sName), s) <+> callCode]
+                    esac
+                esac
+            esac   
+          | STA ->
+            case compile (env, {CALL ("Bsta", 3)}) of
+              [env, cCode] -> [env, code <+> cCode] 
+            esac
+          | ELEM ->
+            case compile (env, { CALL ("Belem", 2) }) of
+              [env, callCode] -> [env, code <+> callCode]
+            esac
+          | BUILTIN (fLab, n) ->
+            case compile (env, { CALL ("L" ++ fLab, n) }) of
+              [env, callCode] -> [env, code <+> callCode]
+            esac
         | _ -> failure ("codegeneration for instruction %s is not yet implemented\n", i.string)
         esac
       }, [env, emptyBuffer ()], code)
