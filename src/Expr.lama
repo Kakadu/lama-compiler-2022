@@ -101,8 +101,67 @@ fun evalList (c, exprs) {
   esac
 }
 
+fun evalWhile (c, cond, body) {
+  case eval (c, cond) of 
+    [c, Var (v)] -> if v then case eval (c, body) of [c, _] -> evalWhile (c, cond, body) esac else c fi
+  esac
+}
+
 fun eval (c@[s, w], expr) {
-  failure ("evalExpr not implemented\n")
+  case expr of
+    Assn (nameExp, varExp) ->
+      case evalList (c, {nameExp, varExp}) of
+        [[s, w], {Ref (name), Var (v)}]       -> [[s <- [name, Var (v)], w], Var (v)]
+      | [c, {ArrayRef (arrName, i), Var (v)}] -> arrName[i] := v; [c, Var (v)]
+      esac
+  | Seq (fst, snd) -> case evalList(c, {fst, snd}) of [c, {_, v}] -> [c, v] esac
+  | Skip -> [c, Void]
+  | If (condExp, thExp, elExp) -> 
+      case eval (c, condExp) of [c, Var (cond)] -> eval(c, if cond then thExp else elExp fi) esac
+  | While (cond, body) -> [evalWhile (c, cond, body), Void]
+  | DoWhile (body, cond) -> case eval (c, body) of [c, _] -> [evalWhile (c, cond, body), Void] esac
+  | Var (name) -> [c, case lookup (s, name) of Var (v) -> Var (v) esac] 
+  | Ref (name) -> [c, Ref (name)]
+  | Const (v) -> [c, Var (v)]
+  | Binop (op, lExp, rExp) -> 
+      case evalList(c, {lExp, rExp}) of [c, {Var (l), Var (r)}] -> [c, Var (evalOp (op, l, r))] esac
+  | Ignore (e) -> case eval (c, e) of [c, _] -> [c, Void] esac
+  | Scope (defs, e) ->
+      fun addDefs (s, defs) {
+        foldl (
+          fun (s, d) {
+            case d of
+              Var (defs)              -> addNames (s, defs)
+            | Fun (name, args, body)  -> addFunction (s, name, args, body)
+            esac
+          }, 
+          s, 
+          defs
+        )
+      }
+      case eval ([addDefs (enterScope (s), defs), w], e) of [[s, w], v] -> [[leaveScope (s), w], v] esac
+  | Call (fname, args) ->
+      case lookup (s, fname) of
+        Fun (_, External)     -> eval (c, Builtin (fname, args))
+      | Fun (argNames, body)  ->
+          case evalList (c, args) of [[s, w], args] ->
+            fun copyArgs (s, args) { foldl (fun (s, [argName, arg]) { addName (s, argName, arg) }, s, args) }
+            case eval ([copyArgs (enterScope (enterFunction (s)), zip (argNames, args)), w], body) of
+              [[sFun, w], Var (v)] -> [[leaveFunction (s, getGlobal (sFun)), w], Var (v)]
+            esac
+          esac
+      esac
+  | Builtin (name, args) ->
+      case evalList (c, args) of [[s, w], l] ->
+        case evalBuiltin (name, map (fun(Var (x)) {x}, l), w) of [v, w] -> [[s, w], Var (v)] esac
+      esac
+  | Array (arr) -> case evalList (c, arr) of [c, vals] -> [c, Var (listArray (map (fun (Var (x)) {x}, vals)))] esac
+  | Elem (e, i) -> case evalList (c, {e, i}) of [c, {Var (arr), Var (i)}] -> [c, Var (arr[i])] esac
+  | ElemRef (e, i) -> case evalList (c, {e, i}) of [c, {Var (arr), Var (i)}] -> [c, ArrayRef (arr, i)] esac
+  | String (s) -> [c, Var (s)]
+  | Set (ident, e) -> case eval (c, e) of [[s, w], Var (v)] -> [[s <- [ident, Var (v)], w], Var (v)] esac
+  | Sexp (name, l) -> eval (c, Array (l))
+  esac
 }
 
 
