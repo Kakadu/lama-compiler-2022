@@ -102,7 +102,94 @@ fun evalList (c, exprs) {
 }
 
 fun eval (c@[s, w], expr) {
-  failure ("evalExpr not implemented\n")
+  case expr of
+      Assn (ElemRef(e, i), r) ->
+          case evalList(c, {e, i, r}) of [c, {Val(e), Val(i), Val(r)}] ->
+            e[i] := r; [c, Val(r)]
+          esac
+    | Assn (l, r) ->
+        case eval (c, l) of [c, Ref(variable)] ->
+          case eval (c, r) of [[s, w], Val(value)] ->
+            [[s <- [variable, Var(value)], w], Val(value)]
+          esac
+        esac
+    | Seq (l, r) ->
+        case eval (c, l) of [c, _] ->
+          case eval (c, r) of [c, retval] ->
+            [c, retval]
+          esac
+        esac
+    | Skip -> [c, Void]
+    | Read (x) -> case readWorld(w) of [v, w] -> [[s <- [x, Var(v)], w], Void] esac
+    | Write (e) -> case eval (c, e) of [c@[s, w], Val(value)] -> [[s, writeWorld(value, w)], Void] esac
+    | If (cond, t, f) ->
+        case eval (c, cond) of [c, Val(value)] ->
+          if value then
+            eval (c, t)
+            else
+              eval (c, f)
+          fi
+        esac
+    | While (cond, body) ->
+        while case eval (c, cond) of [conf@[s, w], Val(value)] -> c := conf; value esac do
+          case eval (c, body) of [conf, _] -> c := conf esac
+        od; [c, Void]
+    | DoWhile (body, cond) ->
+        case eval (c, body) of [conf, _] -> c := conf esac;
+        while case eval (c, cond) of [conf@[s, w], Val(value)] -> c := conf; value esac do
+          case eval (c, body) of [conf, _] -> c := conf esac
+        od; [c, Void]
+    | Var (x) -> [c, Val(case lookup(s, x) of Var(v) -> v esac)]
+    | Ref (x) -> [c, Ref(x)]
+    | Const (n) -> [c, Val(n)]
+    | Binop (op, l, r) ->
+        case eval (c, l) of [c, Val(lv)] ->
+          case eval (c, r) of [c, Val(rv)] ->
+            [c, Val(evalOp(op, lv, rv))]
+          esac
+        esac
+    | Ignore (e) -> case eval (c, e) of [c, _] -> [c, Void] esac
+    | Scope (defs, e) ->
+        fun addFunDefs(s, fdefs) {
+          fun addFunDef(s, Fun(f, args, body)) {
+            addFunction(s, f, args, body)
+          }
+  
+          foldl(addFunDef, s, fdefs)
+        }
+  
+        case defs of Var(vdefs) : fdefs ->
+          case eval([addFunDefs(addNames(enterScope(s), vdefs), fdefs), w], e) of [[s, w], v] ->
+            [[leaveScope(s), w], v]
+          esac
+        esac
+    | Call (f, args) ->
+        fun setArg(s, [name, Val(v)]) {
+          addName(s, name, Var(v))
+        }
+  
+  
+        case evalList(c, args) of [[s, w], args] ->
+          case lookup(s, f) of
+            Fun(_, External) ->
+              case evalBuiltin(f, extractVals(args), w) of [v, w] ->
+                [[s, w], Val(v)]
+              esac
+            | Fun(argNames, body) ->
+              case eval([foldl(setArg, enterScope(enterFunction(s)), zip(argNames, args)), w], body) of
+                [[fs, w], Val(retval)] -> [[leaveFunction(s, getGlobal(fs)), w], Val(retval)]
+              esac
+          esac
+        esac
+    | Array (x) ->
+        case evalList(c, x) of [c, vals] -> [c, Val(listArray(extractVals(vals)))] esac
+
+    | String (s) -> [c, Val(s)]
+    | Elem (e, i) ->
+        case evalList(c, {e, i}) of [c, {Val(e), Val(i)}]-> [c, Val(e[i])] esac
+    | Sexp (_, args) -> eval(c, Array(args))
+    | Set (x, e) -> case eval(c, e) of [[s, w], Val(v)] -> [[s <- [x, Var(v)], w], Val(v)] esac
+  esac
 }
 
 
@@ -112,5 +199,12 @@ public fun evalExpr (input, expr) {
                                       .addName ("write",  Fun ({"a"}, External))
                                       .addName ("length", Fun ({"a"}, External)), createWorld (input)], expr) of
     [c, _] -> c.snd.getOutput
+  esac
+}
+
+fun extractVals(vs) {
+  case vs of
+      {} -> {}
+    | Val(v) : vs -> v : extractVals(vs)
   esac
 }
