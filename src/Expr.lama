@@ -101,9 +101,113 @@ fun evalList (c, exprs) {
   esac
 }
 
-fun eval (c@[s, w], expr) {
-  failure ("evalExpr not implemented\n")
-}
+fun eval(c@[s, w], expr) {
+   case expr of
+     Assn (l, r) -> case evalList(c, { l, r }) of
+       [c, { ElemRef(arr, i), v }] -> [c, arr[i] := v]
+       | [[s, w], { Ref (x), v }] ->
+         lookupVal (s, x);
+         [[s <- [x, Val (v)], w], v]
+     esac
+     | Seq (e1, e2) -> case evalList(c, { e1, e2 }) of
+       [c, { 0, z }] -> [c, z]
+     esac
+     | Skip -> [c, 0]
+     | If (e1, e2, e3) -> case eval(c, e1) of
+       [c, 0] -> eval(c, e3)
+       | [c, _] -> eval(c, e2)
+     esac
+     | While (e1, e2) -> case eval(c, e1) of
+       [c, 0]  -> [c, 0]
+       | [c, _] -> case eval(c, e2) of
+         [c, 0] -> eval(c, expr)
+       esac
+     esac
+     | DoWhile (e1, e2) -> case eval(c, e1) of
+       [c, 0] -> case eval(c, e2) of
+         [c, 0] -> [c, 0]
+         | [c, _] -> eval(c, expr)
+       esac
+     esac
+     | Var (x) -> [c, case lookupVal (s, x) of Val(v) -> v esac]
+     | Ref (x) -> lookupVal (s, x); [c, Ref (x)]
+     | Const (n) -> [c, n]
+     | Binop (op, l, r) -> case evalList(c, { l, r }) of
+       [c, { l, r }] -> [c, evalOp(op, l, r)]
+     esac
+     | Ignore (e) -> case eval(c, e) of
+       [c, _] -> [c, 0]
+     esac
+     | Call (f, as) ->
+       case lookupFun (s, f) of
+         Fun (_, External) -> eval (c, Builtin (f, as))
+         | Fun (ns, b) ->
+           if size (as) != size (ns) then
+             error (sprintf ("unexpected number of arguments for function %s", f), getLoc (f))
+           fi;
+           case evalList(c, as) of
+             [[s, w], vs] ->
+               case eval([
+                 foldl(fun (s, [n, v]) { addName(s, n, Val(v)) }, enterFunction(s), zip(ns, vs)),
+                 w
+               ], b) of
+                 [[s_modified, w], v] -> [[s.leaveFunction(getGlobal(s_modified)), w], v]
+               esac
+           esac
+       esac
+     | Scope (ds, e) ->
+       case eval([
+         foldl(fun (s, d) { case d of
+           Var (ns) -> addNames(s, ns)
+           | Fun (n, as, b) -> addFunction(s, n, as, b)
+         esac }, enterScope(s), ds),
+         w
+       ], e) of
+         [[s, w], v] -> [[leaveScope(s), w], v]
+       esac
+     | Array(es) ->
+       case evalList (c, es) of
+         [c, vs] -> [c, listArray (vs)]
+       esac
+     | Elem(arr, i) ->
+       case evalList (c, { arr, i }) of
+         [c, { arr, i }] -> [c,
+           (case arr of
+             arr@#array -> arr
+             | Sexp(_, arr) -> arr
+             | arr@#str -> arr esac
+           )[i]
+         ]
+       esac
+     | ElemRef(arr, i) ->
+       case evalList (c, { arr, i }) of
+         [c, { arr, i }] -> [c,
+           ElemRef (
+             case arr of
+               arr@#array -> arr
+               | Sexp(_, arr) -> arr
+               | arr@#str -> arr esac,
+             i)
+         ]
+       esac
+     | String(string) -> [c, string]
+     | Builtin(f, args) ->
+       case evalList (c, args) of
+         [[s, w], args] ->
+           case evalBuiltin (f, args, w) of
+             [v, w] -> [[s, w], v]
+           esac
+       esac
+     | Set(x, e) ->
+       case eval (c, e) of
+         [[s, w], v] -> [[s <- [x, Val (v)], w], v]
+       esac
+     | Sexp(x, es) ->
+       case evalList (c, es) of
+         [c, vs] -> [c, Sexp (x, listArray (vs))]
+       esac
+   esac
+ }
 
 
 -- Evaluates a program with a given input and returns an output
