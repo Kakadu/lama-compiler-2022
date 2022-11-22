@@ -530,6 +530,10 @@ fun compileBinop(op, x, y) {
 
 -- Generates a static call
 fun call (env, fLabel, nA) {
+  if fLabel[0] == '$' then
+    fLabel := "L" ++ substring (fLabel, 1, fLabel.length - 1)
+  fi;
+
   case foldl(fun ([pushs, pops], r) { [pushs <+ Push (r), singletonBuffer (Pop (r)) <+> pops] }, 
               [{}, {}], liveRegisters (env, nA)
        ) of
@@ -563,6 +567,24 @@ fun call (env, fLabel, nA) {
 -- and stack machine code, returns an updated environment and x86 code.
 fun compile (env, code) {  
   fun compile (env, code) {
+    fun pushRegs () { emptyBuffer () <+ Push (ebx) <+ Push (ecx) <+ Push (esi) <+ Push (edi) }
+    
+    fun popRegs () { emptyBuffer () <+ Pop (edi) <+ Pop (esi) <+ Pop (ecx) <+ Pop (ebx) }
+    
+    fun compileArgs (env, n) {
+      case n of
+          0 -> [env, emptyBuffer (), emptyBuffer ()]
+        | x -> case pop (env) of
+                [a, env] -> case compileArgs (env, x - 1) of
+                              [env, argsCode, callCode] -> [env, singletonBuffer (Push (a)) <+>
+                                                                 argsCode, singletonBuffer (Pop (edi)) <+>
+                                                                 callCode
+                                                           ]
+                            esac
+              esac
+      esac
+    }
+
     foldl (
       fun ([env, scode], i) {
         var code = scode <+ Meta ("# " ++ showSMInsn (i) ++ "\n");
@@ -627,6 +649,67 @@ fun compile (env, code) {
             case call (env, fLabel, nA) of
               [env, callCode] -> [env, code <+> callCode]
             esac
+        | STA ->
+          case compile (env, {CALL("Bsta", 3)}) of
+            [env, callCode] -> [env, code <+> callCode]
+          esac
+        | ELEM ->
+          case compile (env, {CALL("Belem", 2)}) of
+            [env, callCode] -> [env, code <+> callCode]
+          esac
+        | BUILTIN (f, n) ->
+          case compile (env, {CALL("L" ++ f, n)}) of
+            [env, callCode] -> [env, code <+> callCode]
+          esac
+        | STRING (s) -> 
+          case addString (env, s) of
+            [env, sym] -> 
+            case env.allocate of
+              [y, env] ->
+                case compile(env, {CALL("Bstring", 1)}) of
+                  [env, callCode] -> [env, code <+ Lea (M (sym), y) <+> callCode]
+                 esac
+            esac
+          esac
+        | ARRAY (n)            ->
+          case compileArgs (env, n) of
+            [env, argsCode, callCode] ->
+              case env.allocate of
+                [s, env] ->
+                  [env, code <+>
+                        pushRegs () <+>
+                        argsCode <+
+                        Push (L (n)) <+
+                        Call ("Barray") <+>
+                        callCode <+
+                        Pop (edi) <+>
+                        popRegs () <+>
+                        move (eax, s)
+                  ]
+              esac
+          esac
+        | SEXP (s, n)          ->
+          case addString (env, s) of
+            [env, sn] ->
+              case compileArgs (env, n) of
+                [env, argsCode, callCode] ->
+                  case env.allocate of
+                    [s, env] ->
+                      [env, code <+>
+                            pushRegs () <+
+                            Push (M (sn)) <+>
+                            argsCode <+
+                            Push (L (n + 1)) <+
+                            Call ("Bsexp") <+
+                            Pop (edi) <+>
+                            callCode <+
+                            Pop (edi) <+>
+                            popRegs () <+>
+                            move (eax, s)
+                      ]
+                  esac
+              esac
+          esac
         | _ -> failure ("codegeneration for instruction %s is not yet implemented\n", i.string)
         esac
       }, [env, emptyBuffer ()], code)

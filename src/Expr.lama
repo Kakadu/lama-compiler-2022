@@ -104,8 +104,8 @@ fun evalList (c, exprs) {
 fun eval (c@[st, w], expr) {
   case expr of
       Assn (x, e)             -> case evalList (c, {x, e}) of
-                                   [[st, w], { Ref (x), v }] -> [[st <- [x, Val (v)], w], v]
-                                 | [[st, w], { ARef (vs, i), v}] -> [[st, w], vs[i] := v]
+                                   [[st, w], { Ref (x), v }] -> lookupVal(st, x); [[st <- [x, Val (v)], w], v]
+                                 | [[st, w], { Ref (vs, i), v}] -> [c, vs[i] := v]
                                  esac
     | Seq (stmt1, stmt2)      -> eval (eval ([st, w], stmt1).fst, stmt2)
     | Skip                    -> [[st, w], 0]
@@ -123,8 +123,8 @@ fun eval (c@[st, w], expr) {
                                              | [c, _] -> eval (c, expr)
                                              esac
                                  esac
-    | Var (x)                 -> [c, case lookup (st, x) of Val (x) -> x esac]
-    | Ref (x)                 -> [c, Ref (x)]
+    | Var (x)                 -> [c, case lookupVal (st, x) of Val (x) -> x esac]
+    | Ref (x)                 -> lookupVal (st, x); [c, Ref (x)]
     | Const (n)               -> [c, n]
     | Binop (op, l, r)        -> case evalList (c, {l, r}) of
                                    [c, {x, y}] -> [c, evalOp (op, x, y)]
@@ -142,8 +142,8 @@ fun eval (c@[st, w], expr) {
                                           e) of
                                    [[st, w], vs] -> [[st.leaveScope, w], vs]
                                  esac
-    | Call (f, args)          -> case st.lookup (f) of
-                                   Fun (fargs, External) -> eval (c, Builtin (f, args))
+    | Call (f, args)          -> case lookupFun (st, f) of
+                                   Fun (_, External) -> eval (c, Builtin (f, args))
                                  | Fun (fargs, body) ->
                                     if fargs.size != args.size
                                       then error (sprintf ("Mismatch in number of parameters in function ""%s"" call", f), getLoc (f))
@@ -151,7 +151,7 @@ fun eval (c@[st, w], expr) {
                                     case evalList (c, args) of
                                       [[st, w], vals] ->
                                         var state;
-                                        state := foldl (fun (st, [name, v]) {st.addName (name, Var (v))},
+                                        state := foldl (fun (st, [name, v]) {st.addName (name, Val (v))},
                                                              enterFunction (st),
                                                              zip (fargs, vals));
                                         case eval ([state, w], body) of
@@ -160,7 +160,7 @@ fun eval (c@[st, w], expr) {
                                     esac
                                  esac
     | Sexp (s, args)          -> case evalList (c, args) of
-                                  [c, vals] -> [c, Sexp (s, listArray (args))]
+                                  [c, vals] -> [c, Sexp (s, listArray (vals))]
                                  esac
     | Builtin (f, args)       -> case evalList(c, args) of
                                  [[st, w], vals] ->  case evalBuiltin (f, vals, w) of
@@ -171,13 +171,17 @@ fun eval (c@[st, w], expr) {
     | Array (es)              -> case evalList (c, es) of
                                    [c, vals] -> [c, listArray (vals)]
                                  esac
-    | Elem (e, i)             -> case evalList (c, {e, i}) of
+    | Elem (e, i)             -> case evalList (c, {e, i}) of 
                                    [c, {ev@#array, iv@#val}] -> [c, ev[iv]]
                                  | [c, {ev@#str, iv@#val}] -> [c, ev[iv]]
                                  | [c, {Sexp (_, ev), iv@#val}] -> [c, ev[iv]]
                                  esac
-    | ElemRef (a, i)          -> case evalList (c, {a, i}) of
-                                   [c, {a, i}] -> [c, ElemRef (a, i)]
+    | ElemRef (e, i)          -> case evalList (c, {e, i}) of
+                                 [c, {e, i}] ->
+                                   [c, Ref (case e of
+                                              Sexp(_, vs) -> vs
+                                            | vs          -> vs
+                                            esac, i)]
                                  esac
     | Set (x, e)              -> case eval (c, e) of 
                                   [[st, w], v] -> [[st <- [x, Val (v)], w], v]
