@@ -180,7 +180,7 @@ fun evalInsn (c@[st, cst, s, w], insn) {
         [v : st, cst, s, w]
       esac
   | LD (v) -> [lookup (s, v) : st, cst, s, w]
-  | LDA (x) -> [Ref (x) : st, cst, s, w]
+  | LDA (x) -> [x : st, cst, s, w]
   | BINOP (op) -> 
       case st of
         h1 : h2 : t -> [evalOp(op, h2, h1) : t, cst, s, w]
@@ -211,10 +211,12 @@ fun evalInsn (c@[st, cst, s, w], insn) {
     esac
   | STA ->
     case st of
-      v : i : arr: st -> 
-        case arr of 
-          Sexp (_, arr) -> arr[i] := v; [arr : st, cst, s, w]
-        | _ -> arr[i] := v; [arr : st, cst, s, w]
+      v : i : arr : st -> 
+        case arr of
+            Sexp(_, arr) -> arr[i] := v; [arr:st, cst, s, w]
+          | arr@#str -> arr[i] := v; [arr:st, cst, s, w]
+          | arr@#array -> arr[i] := v; [arr:st, cst, s, w]
+          | x -> assign (s, x, v); [arr:st, cst, s, w]
         esac
     esac
   | STRING (strg) -> [strg : st, cst, s, w]
@@ -519,14 +521,15 @@ public fun compileSM (stmt) {
       Skip           -> [false, env, emptyBuffer ()]   
     | Var (x)        -> [false, env, singletonBuffer (LD (lookupVal (env, x)))]
     | Const (n)      -> [false, env, singletonBuffer (CONST (n))]
-    | Ref (x)        -> [false, env, singletonBuffer (LDA (lookupVar (env, x)))]
+    | Ref (x) -> [false, env, listBuffer ({ LDA (lookupVar (env, x)), LDA (lookupVar (env, x)) })]
+    | Assn  (Ref(x), e) -> compile (lab, env, Set (x, e))
     | Assn  (x, e)   -> 
         case genLabels(env, 2) of
           [l1, l2, env] -> 
             case compile (l1, env, x) of
               [l1Used, env, xCode] -> 
                   case compile (l2, env, e) of
-                    [l2Used, env, eCode] -> [false, env, xCode <+> label (l1, l1Used) <+> eCode <+> label (l2, l2Used) <+ case x of ElemRef(_, _) -> STA | _ -> STI esac]
+                    [l2Used, env, eCode] -> [false, env, xCode <+> label (l1, l1Used) <+> eCode <+> label (l2, l2Used) <+  STA]
                   esac
             esac
         esac
@@ -581,7 +584,7 @@ public fun compileSM (stmt) {
       esac
     | If (cond, body1, body2) ->
         case env.genLabels(2) of
-          [elseL, postCondL, env] -> 
+          [postCondL, elseL, env] -> 
           case compile (lab, env, body1) of
             [_, env, thenCode] -> 
               case compile (lab, env, body2) of

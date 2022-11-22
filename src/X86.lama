@@ -469,24 +469,24 @@ fun compileCmp (x,y,s,op){
 }
 
 fun compileLogic(x,y,s,op){
-  compileCmp(L(0), y, y, "!=") <+> compileCmp(L(0), x, x, "!=") <+> move (y, eax) <+ Binop(op, x, eax) <+> move(eax,s)
+   singletonBuffer (Sar1 (y)) <+> compileCmp(L(0), y, y, "!=") <+> singletonBuffer (Sar1 (x)) <+> compileCmp(L(0), x, x, "!=") <+> move (y, eax) <+ Binop(op, x, eax) <+> move(eax,s)
 }
 
 fun compileBinopX86(x,y,s,op) {
   case op of 
-      "+" -> move(y, eax) <+ Binop(op, x, eax) <+> move(eax, s)
-    | "-" -> move(y, eax) <+ Binop(op, x, eax) <+> move(eax, s)
-    | "*" -> move(y, eax) <+ Binop(op, x, eax) <+> move(eax, s)
-    | "/" -> move(y, eax) <+ Cltd <+ IDiv(x) <+> move(eax,s)
-    | "%" -> move(y, eax) <+ Cltd <+ IDiv(x) <+> move(edx,s)
-    | "==" -> compileCmp (x,y,s,op)
-    | "!=" -> compileCmp (x,y,s,op)
-    | "<" -> compileCmp (x,y,s,op)
-    | "<=" -> compileCmp (x,y,s,op)
-    | ">" -> compileCmp (x,y,s,op)
-    | ">=" -> compileCmp (x,y,s,op)
-    | "&&" -> compileLogic(x,y,s,op)
-    | "!!" -> compileLogic(x,y,s,op)
+      "+" -> move(y, eax) <+ Binop(op, x, eax) <+> move(eax, s) <+ Binop ("-", L (1), s)
+    | "-" -> move(y, eax) <+ Binop(op, x, eax) <+> move(eax, s) <+ Binop ("+", L (1), s)
+    | "*" -> listBuffer ({ Sar1 (x), Sar1 (y) }) <+> move(y, eax) <+ Binop(op, x, eax) <+> move(eax, s) <+> toFixedNum (s)
+    | "/" -> listBuffer ({ Sar1 (x), Sar1 (y) }) <+> move(y, eax) <+ Cltd <+ IDiv(x) <+> move(eax,s) <+> toFixedNum (s)
+    | "%" -> listBuffer ({ Sar1 (x), Sar1 (y) }) <+> move(y, eax) <+ Cltd <+ IDiv(x) <+> move(edx,s) <+> toFixedNum (s)
+    | "==" -> compileCmp (x,y,s,op) <+> toFixedNum (s)
+    | "!=" -> compileCmp (x,y,s,op) <+> toFixedNum (s)
+    | "<" -> compileCmp (x,y,s,op) <+> toFixedNum (s)
+    | "<=" -> compileCmp (x,y,s,op) <+> toFixedNum (s)
+    | ">" -> compileCmp (x,y,s,op) <+> toFixedNum (s)
+    | ">=" -> compileCmp (x,y,s,op) <+> toFixedNum (s)
+    | "&&" -> compileLogic(x,y,s,op) <+> toFixedNum (s)
+    | "!!" -> compileLogic(x,y,s,op) <+> toFixedNum (s)
   esac
 }
 
@@ -516,7 +516,7 @@ fun compile (env, code) {
         case i of
          CONST (c) -> 
           case allocate(env) of
-            [s, env] -> [env, code <+> move(L(c), s)]
+            [s, env] -> [env, code <+> move(L(makeBox(c)), s)]
           esac
         | LD (x) -> 
             case allocate(env) of
@@ -540,7 +540,7 @@ fun compile (env, code) {
             esac
         | CJMP (cond, lab) ->
           case pop(env) of
-            [s, env] -> [env.setStack(lab), code <+> move (s, eax) <+ Binop ("&&", eax, eax) <+ CJmp(cond, lab)]
+            [s, env] -> [env.setStack(lab), code <+> move (s, eax) <+ Sar1 (eax) <+ Binop ("&&", eax, eax) <+ CJmp(cond, lab)]
           esac
         | JMP (lab) -> [setBarrier(setStack (env, lab)), code <+ Jmp (lab)]
         | LABEL(lab) -> [if isBarrier(env) then retrieveStack (env, lab) else env fi, code <+ Label (lab)]
@@ -600,7 +600,7 @@ fun compile (env, code) {
                       code
                         <+> pushLiveRegsCode
                         <+> pushElmsCode
-                        <+ Push (L (n))
+                        <+ Push (L (makeBox (n)))
                         <+ Call ("Barray")
                         <+ Binop ("+", L ((n + 1) * wordSize), esp)
                         <+> popLiveRegsCode
@@ -618,9 +618,9 @@ fun compile (env, code) {
                     [env,
                       code
                         <+> pushLiveRegsCode
-                        <+ Push (L (tagHash (x)))
+                        <+ Push (L (makeBox (tagHash (x))))
                         <+> pushElmsCode
-                        <+ Push (L (n + 1))
+                        <+ Push (L (makeBox (n + 1)))
                         <+ Call ("Bsexp")
                         <+ Binop ("+", L ((n + 2) * wordSize), esp)
                         <+> popLiveRegsCode
