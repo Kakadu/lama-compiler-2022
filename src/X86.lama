@@ -440,7 +440,70 @@ fun compile (env, code) {
          -- 1. generate proper prologue for BEGIN instruction (use "prologue" helper); use
          --    env.enterFunction to create a proper environment;
          -- 2. generate epilogue for END instruction.
-               
+        | CONST (value) ->
+            case allocate (env) of
+              [dst, env] -> [env, code <+ Mov (L (value), dst)]
+            esac
+        | GLOBAL (value) -> [addGlobal (env, value), code]
+        | LD (value) ->
+            case allocate (env) of
+              [dst, env] -> [env, code <+> move (loc (env, value), dst)]
+            esac
+        | LDA (value) ->
+            case allocate (env) of
+              [dst, env] -> [
+                            env,
+                            code <+
+                            if memOpnd (dst) then
+                              Lea (loc (env, value), eax) <+ Mov (eax, dst)
+                            else
+                              Lea (loc (env, value), dst)
+                            fi
+                          ]
+            esac
+        | ST (value) -> [env, code <+> move (peek (env), loc (env, value))]
+        | STI ->
+            case pop2 (env) of
+              [value, reference, env] -> [push (env, value), code <+> move (value, I (0, reference))]
+            esac
+        | BINOP (op) ->
+            case env.pop2 of
+              [x, y, env] -> [env.push (y), code <+> compileBinop (op, y, x)] -- reverse arguments order due to location of elements in stack
+            esac
+        | LABEL (l) -> [if isBarrier (env) then retrieveStack (env, l) else env fi, code <+ Label (l)]
+        | JMP (l) -> [setBarrier (env), code <+ Jmp (l)]
+        | CJMP (condition, l) ->
+            case pop (env) of
+              [value, env] -> [setStack (env, l), code <+ Binop ("cmp", L (0), value) <+ CJmp (condition, l)]
+            esac
+        | DROP ->
+            case pop(env) of
+              [value, env] -> [env, code]
+            esac
+        | CALL (f_lab, na) ->
+            case foldl(fun ([pushes, pops], r) { [pushes <+ Push (r), singletonBuffer (Pop (r)) <+> pops] }, [emptyBuffer (), emptyBuffer ()], liveRegisters (env, na)) of
+              [pushRegsCode, popRegsCode] ->
+                fun pushArgs (env, pushArgsCode, n) {
+                  if n == 0
+                    then [env, pushArgsCode]
+                  else
+                    case pop (env) of
+                      [value, env] -> pushArgs(env, pushArgsCode <+ Push (value), n - 1)
+                    esac
+                  fi
+                }
+                case pushArgs (env, emptyBuffer (), na) of
+                  [env, pushArgsCode] ->
+                    case allocate(env) of
+                      [value, env] -> [env, code <+> pushRegsCode <+> pushArgsCode <+ Call (f_lab) <+ Binop ("+", L (wordSize * na), esp) <+> popRegsCode <+ Mov (eax, value)]
+                    esac
+                esac
+            esac
+        | BEGIN (f_lab, na, nl) -> [enterFunction (env, f_lab, nl), code <+> prologue (f_lab)]
+        | END                  ->
+            case epilogue (env) of
+              [env, end_code] -> [env, code <+> end_code]
+            esac            
         | _ -> failure ("codegeneration for instruction %s is not yet implemented\n", i.string)
         (* End *)
         esac
@@ -448,6 +511,64 @@ fun compile (env, code) {
   }
 
   compile (env, code) 
+}
+
+fun compileBinop (op, dst, src) {
+  case operatorType (op) of
+    SimpleArithmetic -> compileSimpleArithmetic (op, dst, src)
+  | Logical -> compileLogical (op, dst, src)
+  | Div -> compileDivision (dst, src) <+ Mov (eax, dst)
+  | Mod -> compileDivision (dst, src) <+ Mov (edx, dst)
+  | Cmp -> compileComparison (op, dst, src)
+  esac
+}
+
+fun operatorType (op) {
+  case op of
+    "+" -> SimpleArithmetic
+  | "-" -> SimpleArithmetic
+  | "*" -> SimpleArithmetic
+  | "&&" -> Logical
+  | "!!" -> Logical
+  | "^" -> SimpleArithmetic
+  | "/" -> Div
+  | "%" -> Mod
+  | _ -> Cmp
+  esac
+}
+
+fun compileSimpleArithmetic (op, dst, src) {
+  if memOpnd (dst) then
+    singletonBuffer (Mov (dst, eax)) <+ Binop (op, src, eax) <+ Mov (eax, dst)
+  else
+    singletonBuffer (Binop (op, src, dst))
+  fi
+}
+
+fun compileLogical (op, dst, src) {
+  singletonBuffer (Binop ("^", eax, eax))    <+
+                  Binop ("cmp", eax, src)    <+
+                  Set (suffix ("!="), "%al") <+
+                  Binop ("^", edx, edx)      <+
+                  Binop ("cmp", edx, dst)    <+
+                  Set (suffix ("!="), "%dl") <+
+                  Binop (op, edx, eax)       <+
+                  Mov (eax, dst)
+}
+
+fun compileDivision (dst, src) {
+  singletonBuffer (Mov (dst, eax)) <+ Cltd <+ IDiv (src)
+}
+
+fun compileComparison (op, dst, src) {
+  var code;
+  code := singletonBuffer (Binop ("^", eax, eax));
+  if memOpnd (src) then
+    code <+ Mov (dst, edx) <+ Binop ("cmp", src, edx) <+
+            Set (suffix(op), "%al") <+ Mov (eax, dst)
+  else
+    code <+ Binop ("cmp", src, dst) <+ Set (suffix(op), "%al") <+ Mov (eax, dst)
+  fi
 }
 
 -- A top-level codegeneration function. Takes a driver's environment and a stack machine program,

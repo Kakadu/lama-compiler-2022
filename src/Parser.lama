@@ -105,24 +105,78 @@ fun distributeScope (expr, exprConstructor) {
   esac
 }
 
+var whileDoExpr = memo $ eta syntax (loc=pos kWhile cond_expr=exp kDo body_expr=scopeExpr kOd {
+  fun (a) {assertVoid (a, While (cond_expr (Val), body_expr (Void)), loc)}
+});
+
+var doWhileExpr = memo $ eta syntax (loc=pos kDo body_expr=scopeExpr kWhile cond_expr=exp kOd {
+  fun (a) {assertVoid (a,
+    distributeScope (body_expr (Void),
+      fun (expr) {
+        DoWhile (expr, cond_expr (Val))
+      }
+    ),
+    loc
+  )}
+});
+
+var forExpr = memo $ eta syntax (
+  loc=pos kFor init_expr=scopeExpr s[","] cond_expr=exp s[","] step_expr=exp kDo body_expr=scopeExpr kOd {
+    fun (a) {
+      assertVoid (a,
+        distributeScope (init_expr (Void),
+          fun (expr) {
+            Seq (expr, While (cond_expr (Val), Seq (body_expr (Void), step_expr (Void))))
+          }
+        ),
+        loc
+      )
+    }
+  }
+);
+
+var ifExpr = memo $ eta syntax (loc=pos kIf cond_expr=exp kThen true_expr=scopeExpr false_expr=elsePartExpr  {
+      fun (a) {If (cond_expr (Val), true_expr (a), false_expr (a))}
+    }),
+    elsePartExpr = memo $ eta syntax (loc=pos kFi {fun (a) {assertVoid (a, Skip, loc)}} |
+                                      kElse else_expr=scopeExpr kFi {
+                                        fun (a) {else_expr (a)}
+                                      } |
+                                      loc=pos kElif cond_expr=exp kThen true_expr=scopeExpr false_expr=elsePartExpr {
+                                        fun (a) {If (cond_expr (Val), true_expr (a), false_expr (a))}
+                                      });
+
 var primary    = memo $ eta syntax (
                                       -- decimal constant
                                       loc=pos x=decimal                                 {fun (a) {assertValue (a, Const (stringInt (x)), loc)}}     |
 
                                       -- identifier
-                                      x=lident args=inbr[s("("), list0(syntax(e=exp {e(Val)})), s(")")]? {fun (a) {
+                                      loc=pos x=lident args=inbr[s("("), list0(syntax(e=exp {e(Val)})), s(")")]? {fun (a) {
                                                                                                             case args of
                                                                                                               None -> case a of
                                                                                                                         Ref  -> Ref (x)
                                                                                                                       | Void -> Ignore (Var (x))
                                                                                                                       | _    -> Var (x)
                                                                                                                       esac
-                                                                                                            | Some (args) -> assertValue (a, Call (x, args))
+                                                                                                            | Some (args) -> assertValue (a, Call (x, args), loc)
                                                                                                             esac
                                                                                                          }} |
 (* Assignment *)
-                                      $(failure ("the rest of primary parsing in not implemented\n"))),
-(* End *)
+                                      inbrace_expr=inbr[s ("("), scopeExpr, s (")")] {inbrace_expr} |
+                                      loc=pos kRead dst_var=inbr[s ("("), lident, s (")")] {
+                                        fun (a) {assertVoid (a, Read (dst_var), loc)}
+                                      } |
+                                      loc=pos kWrite expr=inbr[s ("("), exp, s (")")] {
+                                        fun (a) {assertVoid (a, Write (expr (Val)), loc)}
+                                      } |
+                                      loc=pos kSkip {
+                                        fun (a) {assertVoid (a, Skip, loc)}
+                                      } |
+                                      if_expr=ifExpr {if_expr} |
+                                      for_expr=forExpr {for_expr} |
+                                      while_expr=whileDoExpr {while_expr} |
+                                      do_while_expr=doWhileExpr {do_while_expr}
+                                    ),(* End *)
       basic      = memo $ eta (expr ({[Right, {[s (":="),
                                                 fun (l, loc, r) {
                                                   fun (a) {assertValue (a, Assn (l (Ref), r (Val)), loc)}
