@@ -478,27 +478,31 @@ fun getOpType (op) {
 }
 
 fun genGeneral (op, l, r) {
-  if memOpnd (l)
-  then singletonBuffer (Mov (l, eax)) <+ Binop (op, r, eax) <+ Mov (eax, l)
-  else singletonBuffer (Binop (op, r, l))
-  fi
+  case op of
+    "+" -> singletonBuffer (Mov (l, eax)) <+ Binop (op, r, eax) <+ Dec (eax) <+ Mov (eax, l)
+  | "-" -> singletonBuffer (Mov (l, eax)) <+ Binop (op, r, eax) <+ Or1 (eax) <+ Mov (eax, l)
+  | "*" -> singletonBuffer (Mov (l, eax)) <+ Dec (eax) <+ Sar1 (r) <+ Binop (op, r, eax) <+ Or1 (eax) <+ Mov (eax, l)
+  esac
 }
 
 fun genLogical (op, l, r) {
-  singletonBuffer (Mov (l, eax)) <+ Mov (L (0), edx) <+ Binop ("cmp", eax, edx) <+
-  Mov (L (0), eax) <+ Set ("ne", "%al") <+ Push (eax) <+ Mov (r, eax) <+
+  singletonBuffer (Mov (l, eax)) <+ Sar1 (eax) <+ Mov (L (0), edx) <+ Binop ("cmp", eax, edx) <+
+  Mov (L (0), eax) <+ Set ("ne", "%al") <+ Push (eax) <+ Mov (r, eax) <+ Sar1 (eax) <+
   Binop ("cmp", eax, edx) <+ Mov (L (0), eax) <+ Set ("ne", "%al") <+ Pop (edx) <+
-  Binop (op, edx, eax) <+ Mov (eax, l)
+  Binop (op, edx, eax) <+> toFixedNum (eax) <+ Mov (eax, l)
 }
 
 fun genDivision (op, l, r) {
-  singletonBuffer (Mov (l, eax)) <+ Cltd <+ IDiv (r) <+
-  Mov (case op of "/" -> eax | "%" -> edx esac, l)
+  singletonBuffer (Mov (l, eax)) <+ Sar1 (eax) <+ Sar1 (r) <+ Cltd <+ IDiv (r) <+>
+  case op of
+    "/" -> toFixedNum (eax) <+ Mov (eax, l)
+  | "%" -> toFixedNum (edx) <+ Mov (edx, l)
+  esac
 }
 
 fun genComparison (op, l, r) {
   singletonBuffer (Mov (l, eax)) <+ Mov (r, edx) <+ Binop ("cmp", edx, eax) <+
-  Mov (L (0), eax) <+ Set (suffix(op), "%al") <+ Mov (eax, l)
+  Mov (L (0), eax) <+ Set (suffix(op), "%al") <+> toFixedNum (eax) <+ Mov (eax, l)
 }
 
 fun genBinOp (op, l, r) {
@@ -544,7 +548,7 @@ fun genArray (env, na) {
     esac
   od;
 
-  pushArgs := pushArgs +++ {Mov (L (na), eax), Push (eax)};
+  pushArgs := pushArgs +++ {Mov (L (makeBox (na)), eax), Push (eax)};
 
   case allocate (env) of [x, env] ->
     [env, listBuffer (pushRegs) <+> listBuffer (pushArgs) <+ Call ("Barray") <+
@@ -588,7 +592,7 @@ fun compile (env, code) {
 
         | CONST (n) ->
           case allocate (env) of
-            [s, env] -> [env, code <+> move (L (n), s)]
+            [s, env] -> [env, code <+> move (L (makeBox (n)), s)]
           esac
         | LD (x) ->
             case allocate (env) of
@@ -612,12 +616,14 @@ fun compile (env, code) {
           esac
         | CJMP (c, l) ->
           case pop (env) of
-            [s, env] -> [setStack (env, l), code <+ Mov (L (0), eax) <+ Binop ("cmp", eax, s) <+
+            [s, env] -> [setStack (env, l), code <+ Mov (L (makeBox (0)), eax) <+ Binop ("cmp", eax, s) <+
                          CJmp (c, l)]
           esac
         | LDA (x) ->
-            case allocate (env) of
-              [s, env] -> [env, code <+ Lea (loc (env, x), eax) <+ Mov (eax, s)]
+            case allocate (env) of [s1, env] ->
+              case allocate (env) of [s2, env] ->
+               [env, code <+ Lea (loc (env, x), eax) <+ Mov (eax, s1) <+ Mov (eax, s2)]
+              esac
             esac
         | STI ->
             case pop2 (env) of

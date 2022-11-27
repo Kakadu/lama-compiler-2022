@@ -170,8 +170,13 @@ fun eval (env, w, insns) {
     | ARRAY (n)  -> case take(stack, n) of [stack, elems] ->
                       [listArray(elems) : stack, cstack, state, world]
                     esac
-    | STA        -> case stack of v : i : a : stack ->
-                      [(a[i] := v) : stack, cstack, state, world]
+    | STA        -> case stack of v : smth : stack ->
+                      case smth of
+                        i@#val -> case stack of a : stack ->
+                                    [(a[i] := v) : stack, cstack, state, world]
+                                  esac
+                      | x -> assign(state, x, v); [v : stack, cstack, state, world]
+                      esac
                     esac
     | ELEM       -> case stack of i : a : stack ->
                       [a[i] : stack, cstack, state, world]
@@ -513,10 +518,7 @@ public fun compileSM (stmt) {
             case compile(e2L, env, e2) of [e2LUsed, env, e2Code] ->
               [false, env,
                e1Code <+> label(e1L, e1LUsed) <+> e2Code <+> label(e2L, e2LUsed)
-               <+ case e1 of
-                    ElemRef (_, _) -> STA
-                  | _              -> STI
-                  esac
+               <+ STA
               ]
             esac
           esac
