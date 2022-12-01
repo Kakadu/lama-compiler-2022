@@ -143,7 +143,7 @@ fun eval (env, w, insns) {
             assign (st, x, value);
             [stack, cst, st, w]
         )
-        | STI       -> (
+        | STI       -> ( -- FIXME - delete, redundant code
             var value = stack.hd, ytail = stack.tl;
             var ref = ytail.hd, stackTail = ytail.tl;
             assign (st, ref, value);
@@ -172,21 +172,30 @@ fun eval (env, w, insns) {
             esac
         )
         | STA -> (
-            var value = stack.hd, xtail = stack.tl;
-            var index = xtail.hd, ytail = xtail.tl;
-            var arr = ytail.hd, stackTail = ytail.tl;
-            arr[index] := value;
-            case arr of
-              Sexp (_, arr) -> arr[index] := value
-            | _ -> arr[index] := value
-            esac;
-            [value : stackTail, cst, st, w]
+            case stack of
+                value : smth : ytail ->
+                case smth of
+                      index@#val -> (
+                        var arr = ytail.hd, stackTail = ytail.tl;
+                        case arr of
+                          Sexp (_, arr) -> arr[index] := value
+                        | _ -> arr[index] := value
+                        esac;
+                        [value : stackTail, cst, st, w]
+                    )
+                    | ref -> (
+                        assign (st, ref, value);
+                        [value : ytail, cst, st, w]
+                    )
+                esac
+            esac
         )
         esac
       }
 
       case insns of
           ins : insns ->
+            -- printf("%s\n", showSMInsn(ins));
             case ins of
               LABEL (_) -> eval (c, insns)
             | JMP (lab) -> eval (c, env.fromLabel (lab))
@@ -229,6 +238,7 @@ fun eval (env, w, insns) {
 -- Runs a stack machine for a given input and a given program, returns an output
 public fun evalSM (input, insns) {
   -- printf("%s\n", showSM (insns));
+  -- printf("====");
   eval (initEvalEnv (insns), createWorld (input), insns)
 }
 
@@ -292,7 +302,7 @@ fun makeCompEnv (nLabels, scopeDepth, state, nLocals, nArgs, functions) {
 
   -- Get functions and empty functions list
   fun getFuns () {
-    [functions, makeCompEnv (nLabels, scopeDepth, state, nLocals, nArgs, {})] -- FIXME nArgs and nLocals must be swapped
+    [functions, makeCompEnv (nLabels, scopeDepth, state, nLocals, nArgs, {})]
   }
 
   -- Lookups variable
@@ -504,7 +514,7 @@ public fun compileSM (stmt) {
             Fun (fLabel, args, body, state) -> (
                 case genLabel (addArgs (beginFun (startEnv, state), args)) of
                     [funLab, env] -> case compile (funLab, env, body) of
-                        [funLabUsed, env, bodyCode] -> [startEnv, code <+> listBuffer({ LABEL (fLabel), BEGIN (fLabel, args.size, getLocals (env)) }) <+> bodyCode <+> label (funLab, funLabUsed) <+ END]
+                        [funLabUsed, env, bodyCode] -> [env, code <+> listBuffer({ LABEL (fLabel), BEGIN (fLabel, args.size, getLocals (env)) }) <+> bodyCode <+> label (funLab, funLabUsed) <+ END]
                     esac
                 esac
             )
@@ -603,7 +613,7 @@ public fun compileSM (stmt) {
         case env.genLabels(2) of
             [lab1, lab2, env] -> case compile (lab1, env, x) of
                 [lab1Used, env, code1] -> case compile (lab2, env, e) of
-                    [lab2Used, env, code2] -> [false, env, code1 <+> label (lab1, lab1Used) <+> code2 <+> label (lab2, lab2Used) <+ case x of ElemRef(_, _) -> STA | _ -> STI esac]
+                    [lab2Used, env, code2] -> [false, env, code1 <+> label (lab1, lab1Used) <+> code2 <+> label (lab2, lab2Used) <+ STA]
                 esac
             esac
         esac

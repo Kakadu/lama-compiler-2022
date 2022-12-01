@@ -519,23 +519,29 @@ fun compile (env, code) {
             esac
         | LDA (x)   ->
             case env.allocate of
-              [s, env] -> [env, code <+ if memOpnd(s) then Lea(env.loc(x), eax) <+ Mov(eax, s) else Lea(env.loc(x), s) fi]
+              [s, env] -> case env.allocate of -- this redundant stack slot used for Bsta bultin
+                    [sRedundant, env] -> [env, code <+ Lea(env.loc(x), eax) <+ Mov (eax, s) <+ Mov (eax, sRedundant)]
+                esac
             esac
-        | LABEL (lab) -> [if env.isBarrier then env.retrieveStack(lab).setBarrier else env fi, code <+ Label (lab)]
+        | LABEL (lab) -> [if env.isBarrier then env.retrieveStack(lab) else env fi, code <+ Label (lab)]
         | JMP (lab) -> [env.setBarrier, code <+ Jmp (lab)]
         | CJMP (suffix, lab) ->
           case env.pop of
-              [s, env] -> [env.setStack(lab), code <+> if memOpnd (s) then move (s, eax) <+ Binop ("&&", eax, eax) else singletonBuffer (Binop ("&&", s, s)) fi <+ CJmp (suffix, lab)]
+              [s, env] -> [env.setStack(lab), code <+>
+              singletonBuffer(Sar1(s)) <+>
+              if memOpnd (s) then move (s, eax) <+ Binop ("&&", eax, eax) else singletonBuffer (Binop ("&&", s, s)) fi
+              <+ CJmp (suffix, lab)]
           esac
         | CONST (n) ->
             case env.allocate of
-              [s, env] -> [env, code <+ Mov (L(n), s)]
+              [s, env] -> [env, code <+ Mov (L(makeBox(n)), s)]
             esac
-        | BINOP (binop) ->
+        | BINOP (binop) -> -- FIXME
             case env.pop2 of
               [y, x, env] -> (
                   [env.push(x),
                       code <+>
+                      singletonBuffer(Sar1(x)) <+ Sar1(y) <+> -- FIXME might be more optimal strategy to sum up
                       if compare(binop, "+") == 0 !! compare(binop, "-") == 0 !! compare(binop, "*") == 0 then
                            if memOpnd(x)
                            then singletonBuffer(Mov (x, eax)) <+ Binop (binop, y, eax) <+ Mov (eax, x)
@@ -558,6 +564,7 @@ fun compile (env, code) {
                            Binop(binop, edx, eax) <+ Mov(eax, x)
                       else failure ("codegeneration for instruction %s is not yet implemented\n", binop)
                       fi
+                      <+> toFixedNum(x)
                   ]
               )
             esac
@@ -571,7 +578,7 @@ fun compile (env, code) {
             esac
         | GLOBAL (x) -> [addGlobal (env, x), code]
         | ARRAY (n) -> makeCall(code, env, n, fun () {
-            singletonBuffer(Push (L (n))) <+ Call ("Barray") <+ Binop ("+", L (wordSize), esp)
+            singletonBuffer(Push (L (makeBox (n)))) <+ Call ("Barray") <+ Binop ("+", L (wordSize), esp)
         })
         | STRING (s) -> (
             case addString(env, s) of
@@ -602,7 +609,7 @@ fun compile (env, code) {
                           <+> codePushLiveRegs
                           <+  Push (L (tagHash (name)))
                           <+> codePushArgs
-                          <+  Push (L (nArgs + 1))
+                          <+  Push (L (makeBox (nArgs + 1)))
                           <+  Call ("Bsexp")
                           <+  Binop ("+", L ((nArgs + 2) * wordSize), esp)
                           <+> codePopLiveRegs
