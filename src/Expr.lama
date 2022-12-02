@@ -86,7 +86,7 @@ fun addNames (state, names) {
 fun addFunction (state, name, args, body) {
   state.addName (name, Fun (args, body))
 }
-                                        
+
 -- Evaluates a list of expressions, properly threading a configurations.
 -- Returns the final configuration and the list of values
 fun evalList (c, exprs) {
@@ -102,7 +102,112 @@ fun evalList (c, exprs) {
 }
 
 fun eval (c@[s, w], expr) {
-  failure ("evalExpr not implemented\n")
+  case expr of
+      Assn (r, e)        ->
+        case evalList(c, { r, e }) of
+            [c, { ElemRef(arr, i), v }] -> [c, arr[i] := v]
+          | [[s, w], { Ref (x), v }]    -> [[s <- [x, Val(v)], w], v]
+        esac
+    | Seq (expr1, expr2) ->
+      case eval(c, expr1) of
+        [c1, _] -> eval(c1, expr2)
+      esac
+    | Skip               -> [c, 0]
+    | If (cond, s1, s2)  ->
+      case eval(c, cond) of
+          [c1, false] -> eval(c1, s2)
+        | [c1, _]     -> eval(c1, s1)
+      esac
+    | While (e, b)       ->
+      case eval(c, e) of
+          [c, 0] -> [c, 0]
+        | [c, _] -> case eval(c, b) of
+                      [c, _] -> eval(c, expr)
+                    esac
+      esac
+    | DoWhile (b, e)     ->
+      case eval(c, b) of
+        [c, 0] -> case eval(c, e) of
+                      [c, 0] -> [c, 0]
+                    | [c, _] -> eval(c, expr)
+                  esac
+      esac
+    | Var (x)            -> [c, case lookupVal(s, x) of Val(v) -> v esac]
+    | Ref (x)            -> lookupVal(s, x); [c, Ref(x)]
+    | Const (n)          -> [c, n]
+    | Binop (op, e1, e2) ->
+      case evalList(c, { e1, e2 }) of
+        [c, { l, r }] -> [c, evalOp(op, l, r)]
+      esac
+    | Ignore (e)         ->
+      case eval(c, e) of
+        [c, _] -> [c, 0]
+      esac
+    | Scope (defs, expr) -> (
+      var new_scope = foldl(fun (s, def) {
+        case def of
+            Var (x)                -> addNames(s, x)
+          | Fun (name, args, body) -> addFunction(s, name, args, body)
+        esac
+      }, enterScope(s), defs);
+      case eval([new_scope, w], expr) of
+        [[new_scope, w], v] -> [[leaveScope(new_scope), w], v]
+      esac
+    )
+    | Call (f, args)     ->
+      case lookupFun(s, f) of
+          Fun (_, External) -> eval(c, Builtin(f, args))
+        | Fun(nargs, body)  ->
+          if nargs.size != args.size then failure("Function %s expected %d arguments, but passed %d", f, nargs, args.size) fi;
+          case evalList(c, args) of
+            [[s, w], values] ->
+              case eval([foldl(fun (s, [n, v])
+                {
+                  s.addName(n, Val(v))
+                },
+                s.enterFunction,
+                zip(nargs, values)),
+                w], body) of
+                [[s_func, w], v] -> [[leaveFunction(s, s_func.getGlobal), w], v]
+              esac
+          esac
+      esac
+    | Array(es)          ->
+      case evalList(c, es) of
+        [c, vs] -> [c, listArray(vs)]
+      esac
+    | Elem(a, i)         ->
+      case evalList(c, { a, i }) of
+        [c, { a, i }] -> [
+          c,
+          case a of
+              Sexp(_, a) -> a[i]
+            | _          -> a[i]
+          esac
+        ]
+      esac
+    | ElemRef (a, i)     ->
+      fun ([c, a : i : { }]) {
+        case a of
+            Sexp (_, a) -> [c, ElemRef(a, i)]
+          | _           -> [c, ElemRef(a, i)]
+        esac
+      }(evalList(c, { a, i }))
+    | String(s)          -> [c, s]
+    | Builtin(f, args)   ->
+      case evalList(c, args) of
+        [[s, w], args] ->
+          case evalBuiltin(f, args, w) of
+            [v, w] -> [[s, w], v]
+          esac
+      esac
+    | Set (s, e)         -> eval(c, Assn(Ref(s), e))
+    | Sexp(x, es)        ->
+      case evalList(c, es) of
+        [c, vs] -> [c, Sexp(x, listArray(vs))]
+      esac
+    | _                  -> failure("Unexpected instruction %s in evalExpr", expr.string)
+  esac
 }
 
 
