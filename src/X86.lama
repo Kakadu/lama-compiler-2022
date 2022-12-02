@@ -466,44 +466,152 @@ fun toFixedNum (r) {
 
 -- Compiles stack machine code into a list of x86 instructions. Takes an environment
 -- and stack machine code, returns an updated environment and x86 code.
-fun compile (env, code) {  
+fun compile (env, code) {
+  fun isOneOf(x, l) {
+    case find(fun (e) { compare(x, e) == 0 }, l) of
+      None -> false
+      | _  -> true
+    esac
+  }
+  fun saveRegs(env, depth) {
+    foldl(fun ([pushes, pops], r) {
+      [pushes <+ Push(r),
+        singletonBuffer(Pop(r)) <+> pops]
+    }, [emptyBuffer(), emptyBuffer()], liveRegisters(env, depth))
+  }
+
+  fun pushArgs(env, pushArgsCode, n) {
+    if n == 0
+      then [env, pushArgsCode]
+      else
+        case pop(env) of
+          [x, env] -> pushArgs(env, pushArgsCode <+ Push(x), n - 1)
+        esac
+    fi
+  }
   fun compile (env, code) {
     foldl (
       fun ([env, scode], i) {
         var code = scode <+ Meta ("# " ++ showSMInsn (i) ++ "\n");
-
         case i of
-          READ ->
-            case env.allocate of
-              [s, env] -> [env, code <+ Call ("Lread") <+ Mov (eax, s)]
-            esac             
-        | WRITE ->
-            case env.pop of
-              [s, env] -> [env, code <+ Push (s) <+ Call ("Lwrite") <+ Pop (eax)]
+          CONST (n)  ->
+            case allocate(env) of
+              [s, env] -> [env, code <+> move(L(n), s)]
             esac
-        
-         -- Some guidelines for generating function calls:
-         --
-         -- 1. generate instructions to save live registers on the X86 stack (use
-         --    env.liveRegisters (number of arguments);
-         -- 2. generate instructions to move actual parameters from the symbolic
-         --    stack to the hardware one;
-         -- 3. generate the call itself;
-         -- 4. discard the actual parameters from the stack;
-         -- 5. restore saved live registers.
-         --
-         -- Some guidelines for generating functions:
-         --
-         -- 1. generate proper prologue for BEGIN instruction (use "prologue" helper); use
-         --    env.enterFunction to create a proper environment;
-         -- 2. generate epilogue for END instruction.
-               
-        | _ -> failure ("codegeneration for instruction %s is not yet implemented\n", i.string)
+          | GLOBAL (x)           -> [addGlobal(env, x), code]
+          | LD (x)     ->
+            case allocate(env) of
+              [s, env] -> [env, code <+> move(loc(env, x), s)]
+            esac
+          | LDA (x)     ->
+            case allocate(env) of
+              [s, env] -> [env, code <+ Lea(loc(env, x), eax) <+> move(eax, s)]
+            esac
+          | ST (x)      -> [env, code <+> move(peek(env), loc(env, x))]
+          | STI         ->
+            case pop2(env) of
+              [z, a, env] -> [push(env, z), code <+> move(z, I(0, a))]
+            esac
+          | BINOP (op) -> case pop2(env) of
+            [y, x, env] -> (
+              var compiled =
+                if
+                  isOneOf(op, { "+", "-", "*" }) then
+                  move(x, eax) <+ Binop(op, y, eax) <+> move(eax, x)
+                  elif isOneOf(op, { "/", "%" }) then
+                    move(x, eax) <+ Cltd <+ IDiv(y) <+> move(if compare(op, "/") == 0 then eax else edx fi, x)
+                  elif isOneOf(op, { "<", ">", "<=", ">=", "==", "!=" }) then
+                    move(x, eax) <+ Binop("^", edx, edx) <+ Binop("cmp", y, eax) <+ Set(suffix(op), "%dl") <+> move(edx, x)
+                  elif isOneOf(op, { "&&", "!!" }) then
+                    listBuffer({
+                      Binop("^", eax, eax), Binop("cmp", x, eax), Set(suffix("!="), "%al"),
+                      Binop("^", edx, edx), Binop("cmp", y, edx), Set(suffix("!="), "%dl"),
+                      Binop(op, edx, eax), Mov(eax, x)
+                    })
+                  else
+                    failure("unkown binary operator %s\n", op)
+                fi
+              ;
+              [push(env, x), code <+> compiled]
+            )
+          esac
+          | LABEL (l)   -> [if isBarrier(env) then retrieveStack(env, l) else env fi, code <+ Label(l)]
+          | JMP (l)     -> [setBarrier(env), code <+ Jmp(l)]
+          | CJMP (c, l) ->
+            case pop(env) of
+              [x, env] -> [setStack(env, l), code <+> move(x, eax) <+ Binop("&&", eax, eax) <+ CJmp(c, l)]
+            esac
+          | DROP        ->
+            case pop(env) of
+              [x, env] -> [env, code]
+            esac
+          | CALL (fLab, na)      ->
+            case saveRegs(env, na) of
+              [pushRegsCode, popRegsCode] ->
+                case pushArgs(env, emptyBuffer(), na) of
+                  [env, pushArgsCode] ->
+                    case allocate(env) of
+                      [x, env] -> [env,
+                        code
+                          <+> pushRegsCode
+                          <+> pushArgsCode
+                          <+ Call(fLab)
+                          <+ Binop("+", L(wordSize * na), esp)
+                          <+> popRegsCode
+                          <+> move(eax, x)]
+                    esac
+                esac
+            esac
+          | BEGIN (fLab, na, nl) -> [enterFunction(env, fLab, nl), code <+> prologue(fLab)]
+          | END                  ->
+            case epilogue(env) of
+              [env, endCode] -> [env, code <+> endCode]
+            esac
+          | SEXP (x, n)          ->
+            case pushArgs(env, emptyBuffer(), n) of
+              [env, pushElemsCode] ->
+                case allocate(env) of
+                  [s, env] ->
+                    [env, code
+                      <+ Push(L(tagHash(x)))
+                      <+> pushElemsCode
+                      <+ Push(L(n + 1))
+                      <+ Call("Bsexp")
+                      <+ Binop("+", L(wordSize * (n + 2)), esp)
+                      <+> move(eax, s)]
+                esac
+            esac
+          | STRING (x)           ->
+            case addString(env, x) of
+              [env, sName] ->
+                case allocate(env) of
+                  [s, env] ->
+                    case compile(env, { CALL("Bstring", 1) }) of
+                      [env, callCode] -> [env, code <+ Lea(M(sName), s) <+> callCode]
+                    esac
+                esac
+            esac
+          | ARRAY (n)            ->
+            case pushArgs(env, emptyBuffer(), n) of
+              [env, pushElemsCode] ->
+                case allocate(env) of
+                  [s, env] ->
+                    [env, code
+                      <+> pushElemsCode
+                      <+ Push(L(n))
+                      <+ Call("Barray")
+                      <+ Binop("+", L(wordSize * (n + 1)), esp)
+                      <+> move(eax, s)]
+                esac
+            esac
+          | STA                  -> case compile(env, { CALL("Bsta", 3) }) of [env, callCode] -> [env, code <+> callCode] esac
+          | ELEM                 -> case compile(env, { CALL("Belem", 2) }) of [env, callCode] -> [env, code <+> callCode] esac
+          | BUILTIN (fLab, n)    -> case compile(env, { CALL("L" ++ fLab, n) }) of [env, callCode] -> [env, code <+> callCode] esac
         esac
       }, [env, emptyBuffer ()], code)
   }
 
-  compile (env, code) 
+  compile (env, code)
 }
 
 -- A top-level codegeneration function. Takes a driver's environment and a stack machine program,
