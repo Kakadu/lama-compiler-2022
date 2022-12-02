@@ -27,21 +27,21 @@ var ebx = R (0),
 -- We need to know the word size to calculate offsets correctly
 var wordSize = 4;
 
--- We need to distinguish the following operand types: 
---    R (int)       -- hard register                    
---    S (int)       -- a position on the hardware stack 
---    M (string)    -- a named memory location          
+-- We need to distinguish the following operand types:
+--    R (int)       -- hard register
+--    S (int)       -- a position on the hardware stack
+--    M (string)    -- a named memory location
 --    L (int)       -- an immediate operand
 --    I (int, opnd) -- an indirect operand with offset
 
 -- Some x86 instruction (we do not need all of them):
---   Mov   (opnd, opnd)         -- copies a value from the first to the second operand  
+--   Mov   (opnd, opnd)         -- copies a value from the first to the second operand
 --   Lea   (opnd, opnd)         -- loads an address of the first operand into the second
---   Binop (string, opnd, opnd) -- makes a binary operation; note, the first operand   
+--   Binop (string, opnd, opnd) -- makes a binary operation; note, the first operand
 --                                 designates x86 operator, not the source language one
---   IDiv  (opnd)               -- x86 integer division, see instruction set reference 
---   Cltd                       -- see instruction set reference           
---   Set   (string, string)     -- sets a value from flags; the first operand is the   
+--   IDiv  (opnd)               -- x86 integer division, see instruction set reference
+--   Cltd                       -- see instruction set reference
+--   Set   (string, string)     -- sets a value from flags; the first operand is the
 --                                 suffix, which determines the value being set, the
 --                                 the second --- (sub)register name
 --   Jmp   (string)             -- unconditional jump to a label
@@ -49,25 +49,25 @@ var wordSize = 4;
 --   Label (string)             -- a label
 --   Push  (opnd)               -- pushes the operand on the hardware stack
 --   Pop   (opnd)               -- pops from the hardware stack to the operand
---   Call  (string)             -- calls a function by its name 
+--   Call  (string)             -- calls a function by its name
 --   Ret                        -- returns from a function
 --   Meta  (string)             -- metainformation (declarations, etc.)
 --
---   Dec   (opnd)               -- arithmetic correction: decrement  
---   Or1   (opnd)               -- arithmetic correction: or 0x0001                     
---   Sal1  (opnd)               -- arithmetic correction: shl 1           
+--   Dec   (opnd)               -- arithmetic correction: decrement
+--   Or1   (opnd)               -- arithmetic correction: or 0x0001
+--   Sal1  (opnd)               -- arithmetic correction: shl 1
 --   Sar1  (opnd)               -- arithmetic correction: shr 1
 
 -- Machine instruction printer
 fun insnString (insn) {
-  
+
   fun binopString (op) {
     case op of
       "+"   -> "addl"
     | "-"   -> "subl"
     | "*"   -> "imull"
     | "&&"  -> "andl"
-    | "!!"  -> "orl" 
+    | "!!"  -> "orl"
     | "^"   -> "xorl"
     | "cmp" -> "cmpl"
     esac
@@ -106,7 +106,7 @@ fun insnString (insn) {
   | Dec   (s)          -> sprintf ("\tdecl\t%s\n", opndString (s))
   | Or1   (s)          -> sprintf ("\torl\t$0x0001,\t%s\n", opndString (s))
   | Sal1  (s)          -> sprintf ("\tsall\t%s\n", opndString (s))
-  | Sar1  (s)          -> sprintf ("\tsarl\t%s\n", opndString (s))    
+  | Sar1  (s)          -> sprintf ("\tsarl\t%s\n", opndString (s))
   esac
 }
 
@@ -128,12 +128,12 @@ fun makeEnv (stack, stackSlots, globals, strings, stringIndex, barrier, stackMap
   fun envString () {
     sprintf ("Stack     : %s\nStackSlots: %d\nGlobals   : %s\n", stack.string, stackSlots, elements (globals).string)
   }
-  
+
   -- Allocates a new position on the symbolic stack;
   -- returns a pair: a location for allocated item and
   -- an updated environment
   fun allocate () {
-    case 
+    case
       case stack of
         {}        -> [ebx, 0]
       | S (n) : _ -> [S (n+1), n+2]
@@ -168,7 +168,7 @@ fun makeEnv (stack, stackSlots, globals, strings, stringIndex, barrier, stackMap
   fun peek () {
     stack.fst
   }
-  
+
   -- Adds a global variable; returns an updated environment
   fun addGlobal (name) {
     makeEnv (stack, stackSlots, addSet (globals, globalName (name)), strings, stringIndex, barrier, stackMap, fLabel, nLocals)
@@ -182,7 +182,7 @@ fun makeEnv (stack, stackSlots, globals, strings, stringIndex, barrier, stackMap
     | Loc (i) -> S (i)
     esac
   }
-  
+
   -- Gets a list of global variables from the environment
   fun getGlobals () {
     globals.elements
@@ -251,7 +251,7 @@ fun makeEnv (stack, stackSlots, globals, strings, stringIndex, barrier, stackMap
       | c    -> escaped [j] := c; j := j+1
       esac
     od;
-    
+
     [makeEnv (stack, stackSlots, globals, addSet (strings, [name, substring (escaped, 0, j)]), stringIndex+1, false, stackMap, fLabel, nLocals),
      name]
   }
@@ -265,7 +265,7 @@ fun makeEnv (stack, stackSlots, globals, strings, stringIndex, barrier, stackMap
   fun staticSize () {
     nLocals + stackSlots
   }
-  
+
   [envString,
    allocate,
    push,
@@ -399,7 +399,7 @@ fun stringDef ([name, vl]) {
 fun prologue (fLabel) {
   singletonBuffer (Push  (ebp)) <+
   Mov   (esp, ebp) <+
-  Binop ("-", M (sprintf ("$%s_SIZE", fLabel)), esp)  
+  Binop ("-", M (sprintf ("$%s_SIZE", fLabel)), esp)
 }
 
 -- Generates function epilogue
@@ -419,7 +419,7 @@ fun stackOpnd (opnd) {
   case opnd of
     S (_) -> true
   | _     -> false
-  esac      
+  esac
 }
 
 -- Checks if an operand resides in memory
@@ -496,7 +496,7 @@ fun compile (env, code) {
         case i of
           CONST (n)  ->
             case allocate(env) of
-              [s, env] -> [env, code <+> move(L(n), s)]
+              [s, env] -> [env, code <+> move(L(makeBox(n)), s)]
             esac
           | GLOBAL (x)           -> [addGlobal(env, x), code]
           | LD (x)     ->
@@ -516,18 +516,24 @@ fun compile (env, code) {
             [y, x, env] -> (
               var compiled =
                 if
-                  isOneOf(op, { "+", "-", "*" }) then
-                  move(x, eax) <+ Binop(op, y, eax) <+> move(eax, x)
+                  isOneOf(op, { "+" }) then
+                  move(x, eax) <+ Binop(op, y, eax) <+> move(eax, x) <+ Binop("-", L(1), x)
+                  elif isOneOf(op, { "-" }) then
+                  move(x, eax) <+ Binop(op, y, eax) <+> move(eax, x) <+ Binop("+", L(1), x)
+                  elif isOneOf(op, { "*" }) then
+                    singletonBuffer(Sar1(x)) <+ Sar1(y) <+> move(x, eax) <+ Binop(op, y, eax) <+> move(eax, x) <+> toFixedNum(x)
                   elif isOneOf(op, { "/", "%" }) then
-                    move(x, eax) <+ Cltd <+ IDiv(y) <+> move(if compare(op, "/") == 0 then eax else edx fi, x)
+                    singletonBuffer(Sar1(x)) <+ Sar1(y) <+> move(x, eax) <+ Cltd <+ IDiv(y)
+                      <+> move(if compare(op, "/") == 0 then eax else edx fi, x) <+> toFixedNum(x)
                   elif isOneOf(op, { "<", ">", "<=", ">=", "==", "!=" }) then
-                    move(x, eax) <+ Binop("^", edx, edx) <+ Binop("cmp", y, eax) <+ Set(suffix(op), "%dl") <+> move(edx, x)
+                    move(x, eax) <+ Binop("^", edx, edx) <+ Binop("cmp", y, eax) <+ Set(suffix(op), "%dl")
+                      <+> move(edx, x) <+> toFixedNum(x)
                   elif isOneOf(op, { "&&", "!!" }) then
                     listBuffer({
-                      Binop("^", eax, eax), Binop("cmp", x, eax), Set(suffix("!="), "%al"),
-                      Binop("^", edx, edx), Binop("cmp", y, edx), Set(suffix("!="), "%dl"),
-                      Binop(op, edx, eax), Mov(eax, x)
-                    })
+                      Sar1(x), Binop("^", eax, eax), Binop("cmp", x, eax), Set(suffix("!="), "%al"),
+                      Sar1(y), Binop("^", edx, edx), Binop("cmp", y, edx), Set(suffix("!="), "%dl"),
+                      Binop(op, edx, eax), Mov(eax, x)<+> toFixedNum(x)
+                    }) <+> toFixedNum(x)
                   else
                     failure("unkown binary operator %s\n", op)
                 fi
@@ -539,7 +545,11 @@ fun compile (env, code) {
           | JMP (l)     -> [setBarrier(env), code <+ Jmp(l)]
           | CJMP (c, l) ->
             case pop(env) of
-              [x, env] -> [setStack(env, l), code <+> move(x, eax) <+ Binop("&&", eax, eax) <+ CJmp(c, l)]
+              [x, env] -> [setStack(env, l), code <+ Sar1(x) <+> move(x, eax) <+ Binop("&&", eax, eax) <+ CJmp(c, l)]
+            esac
+          | DUP                  ->
+            case allocate(env) of
+              [s, env] -> [env, code <+> move(peek(env), s)]
             esac
           | DROP        ->
             case pop(env) of
@@ -567,18 +577,23 @@ fun compile (env, code) {
             case epilogue(env) of
               [env, endCode] -> [env, code <+> endCode]
             esac
-          | SEXP (x, n)          ->
-            case pushArgs(env, emptyBuffer(), n) of
-              [env, pushElemsCode] ->
-                case allocate(env) of
-                  [s, env] ->
-                    [env, code
-                      <+ Push(L(tagHash(x)))
-                      <+> pushElemsCode
-                      <+ Push(L(n + 1))
-                      <+ Call("Bsexp")
-                      <+ Binop("+", L(wordSize * (n + 2)), esp)
-                      <+> move(eax, s)]
+          | SEXP (x, n) ->
+            case saveRegs(env, 0) of
+              [pushRegsCode, popRegsCode] ->
+                case pushArgs(env, emptyBuffer(), n) of
+                  [env, pushElemsCode] ->
+                    case allocate(env) of
+                      [s, env] ->
+                        [env, code
+                          <+> pushRegsCode
+                          <+ Push(L(makeBox(tagHash(x))))
+                          <+> pushElemsCode
+                          <+ Push(L(makeBox(n + 1)))
+                          <+ Call("Bsexp")
+                          <+ Binop("+", L(wordSize * (n + 2)), esp)
+                          <+> popRegsCode
+                          <+> move(eax, s)]
+                    esac
                 esac
             esac
           | STRING (x)           ->
@@ -591,17 +606,22 @@ fun compile (env, code) {
                     esac
                 esac
             esac
-          | ARRAY (n)            ->
-            case pushArgs(env, emptyBuffer(), n) of
-              [env, pushElemsCode] ->
-                case allocate(env) of
-                  [s, env] ->
-                    [env, code
-                      <+> pushElemsCode
-                      <+ Push(L(n))
-                      <+ Call("Barray")
-                      <+ Binop("+", L(wordSize * (n + 1)), esp)
-                      <+> move(eax, s)]
+          | ARRAY (n) ->
+            case saveRegs(env, 0) of
+              [pushRegsCode, popRegsCode] ->
+                case pushArgs(env, emptyBuffer(), n) of
+                  [env, pushElemsCode] ->
+                    case allocate(env) of
+                      [s, env] ->
+                        [env, code
+                          <+> pushRegsCode
+                          <+> pushElemsCode
+                          <+ Push(L(makeBox(n)))
+                          <+ Call("Barray")
+                          <+ Binop("+", L(wordSize * (n + 1)), esp)
+                          <+> popRegsCode
+                          <+> move(eax, s)]
+                    esac
                 esac
             esac
           | STA                  -> case compile(env, { CALL("Bsta", 3) }) of [env, callCode] -> [env, code <+> callCode] esac
@@ -626,14 +646,14 @@ public fun compileX86 (args, code) {
                      esac ++ "/runtime.o";
 
        fwrite (asmFile,
-               map (insnString, 
-                    getBuffer $ 
+               map (insnString,
+                    getBuffer $
                       singletonBuffer (Meta ("\t.global\tmain\n")) <+>
                       dataSection (listBuffer (map (intDef   , getGlobals (env))) <+>
                                    listBuffer (map (stringDef, getStrings (env)))) <+>
-                      codeSection (code)                   
+                      codeSection (code)
                     ).stringcat);
-                    
+
        system ({"gcc -g -m32 -o ", args.getBaseName, " ", runtime, " ", asmFile}.stringcat)
   esac
 }

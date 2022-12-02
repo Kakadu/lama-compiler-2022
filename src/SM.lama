@@ -136,7 +136,7 @@ fun eval (env, w, insns) {
               y : x : st -> eval ([evalOp (op, x, y):st, cst, s, w], insns)
             esac
           | LD    (x) -> eval ([lookup (s, x):st, cst, s, w], insns)
-          | LDA (x) -> eval ([Ref (x):st, cst, s, w], insns)
+          | LDA (x) -> eval ([x:st, cst, s, w], insns)
           | ST    (x) ->
             case st of
               z : _ -> assign (s, x, z); eval (c, insns)
@@ -164,6 +164,7 @@ fun eval (env, w, insns) {
               { } -> c
               | [s, insns] : cst -> eval ([st, cst, s, w], insns)
             esac
+          | DUP               -> case st of x : _ -> eval([x:st, cst, s, w], insns) esac
           | CALL (f, _) -> eval ([st, [s, insns]:cst, s, w], fromLabel (env, f))
           | BEGIN (_, na, nl) ->
             case take(st, na) of
@@ -190,13 +191,14 @@ fun eval (env, w, insns) {
             esac
           | STA ->
             case st of
-              v : i : arr : st ->
-                (case arr of
-                  arr@#array -> arr
-                  | Sexp(_, arr) -> arr
-                  | arr@#str -> arr esac
-                )[i] := v;
-                eval ([arr:st, cst, s, w], insns)
+              v : i : addr : st ->
+                (case addr of
+                  arr@#array -> arr[i] := v
+                  | Sexp(_, arr) -> arr[i] := v
+                  | arr@#str -> arr[i] := v
+                  | x -> assign (s, x, v)
+                esac);
+                eval ([addr:st, cst, s, w], insns)
             esac
           | STRING (string) -> eval ([string:st, cst, s, w], insns)
           | BUILTIN (f, n) ->
@@ -492,7 +494,7 @@ public fun compileSM (stmt) {
     case stmt of
       Skip -> [false, env, emptyBuffer ()]
       | Var (x) -> [false, env, singletonBuffer (LD (lookupVal (env, x)))]
-      | Ref (x) -> [false, env, singletonBuffer (LDA (lookupVar (env, x)))]
+      | Ref (x) -> [false, env, singletonBuffer (LDA (lookupVar (env, x))) <+ DUP]
       | Const (n)             -> [false, env, singletonBuffer (CONST (n))]
       | Binop (op, l, r) ->
         case env.genLabels(2) of
@@ -521,6 +523,7 @@ public fun compileSM (stmt) {
               ]
             esac
         esac
+      | Assn (Ref(l), r) -> compile (lab, env, Set (l, r))
       | Assn (l, r)      ->
         case env.genLabels(2) of
           [rLab, stLab, env] ->
@@ -533,7 +536,7 @@ public fun compileSM (stmt) {
                       label(rLab, rLabUsed)
                       <+> rCode
                       <+> label(stLab, stLabUsed)
-                      <+ case l of ElemRef(_, _) -> STA | _ -> STI esac
+                      <+ STA
                   ]
                 esac
             esac
