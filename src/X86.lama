@@ -532,7 +532,7 @@ fun compile (env, code) {
                     listBuffer({
                       Sar1(x), Binop("^", eax, eax), Binop("cmp", x, eax), Set(suffix("!="), "%al"),
                       Sar1(y), Binop("^", edx, edx), Binop("cmp", y, edx), Set(suffix("!="), "%dl"),
-                      Binop(op, edx, eax), Mov(eax, x)<+> toFixedNum(x)
+                      Binop(op, edx, eax), Mov(eax, x)
                     }) <+> toFixedNum(x)
                   else
                     failure("unkown binary operator %s\n", op)
