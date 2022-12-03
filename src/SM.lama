@@ -171,6 +171,7 @@ fun eval (env, w, insns) {
         | STA       -> case stack of
                         v : (i@#val) : (a@#array) : stack -> a[i] := v; [v : stack, cst, st, w]
                       | v : (i@#val) : (a@#str) : stack -> a[i] := v; [v : stack, cst, st, w]
+                      | v : x : stack -> assign (st, x, v); [v : stack, cst, st, w]
                       | v : (i@#val) : (Sexp (_, a)) : stack -> a[i] := v; [v : stack, cst, st, w]
                       esac
         | ELEM      -> case stack of
@@ -483,7 +484,7 @@ public fun compileSM (expr) {
     case expr of
       Skip              -> [false, env, emptyBuffer ()]
     | Var    (x)        -> [false, env, singletonBuffer (LD (lookupVal (env, x)))]
-    | Ref    (x)        -> [false, env, singletonBuffer (LDA (lookupVar (env, x)))]
+    | Ref    (x)        -> [false, env, singletonBuffer (LDA (lookupVar (env, x))) <+ DUP]
     | Const  (n)        -> [false, env, singletonBuffer (CONST (n))]
     | Seq (e1, e2)      -> compileMany (lab, env, {e1, e2})
     | Assn (ElemRef (a, i), e) -> 
@@ -514,7 +515,7 @@ public fun compileSM (expr) {
           case compileMany (opLabel, env, {l, r}) of
             [opUsed, env, lrCode] -> [false, env, lrCode <+>
                                                   label (opLabel, opUsed) <+
-                                                  STI
+                                                  STA
                                      ]
           esac
       esac
@@ -668,6 +669,7 @@ public fun compileSM (expr) {
                                   ]
           esac
       esac
+    | ElemRef (e, i) -> compileMany (lab, env, {e, i})
     | Set (x, e) ->
       case genLabel (env) of
         [aLabel, env] ->

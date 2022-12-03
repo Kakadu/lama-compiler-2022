@@ -105,7 +105,7 @@ fun eval (c@[st, w], expr) {
   case expr of
       Assn (x, e)             -> case evalList (c, {x, e}) of
                                    [[st, w], { Ref (x), v }] -> lookupVal(st, x); [[st <- [x, Val (v)], w], v]
-                                 | [[st, w], { Ref (vs, i), v}] -> [c, vs[i] := v]
+                                 | [[st, w], { Ref (vs, i), v}] -> [[st, w], vs[i] := v]
                                  esac
     | Seq (stmt1, stmt2)      -> eval (eval ([st, w], stmt1).fst, stmt2)
     | Skip                    -> [[st, w], 0]
