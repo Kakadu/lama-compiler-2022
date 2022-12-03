@@ -117,21 +117,33 @@ fun distributeScope (expr, exprConstructor) {
   esac
 }
 
+fun parens(e) {
+  syntax (inbr[s("("), e, s(")")])
+}
+
+fun brackets(e) {
+  syntax (inbr[s("["), e, s("]")])
+}
+
+fun curly(e) {
+  syntax (inbr[s("{"), e, s("}")])
+}
+
 var primary = memo $ eta syntax (
   -- array constant
-  loc=pos x=inbr[s("["), list0(syntax (e=exp { e(Val) })), s("]")] { fun (a) { assertValue(a, Array(x), loc) } }     |
+  loc=pos x=brackets[list0(syntax (e=exp { e(Val) }))] { fun (a) { assertValue(a, Array(x), loc) } }              |
 
   -- string constant
-  loc=pos x=strlit { fun (a) { assertValue(a, String(x), loc) } }                                                    |
+  loc=pos x=strlit { fun (a) { assertValue(a, String(x), loc) } }                                                 |
 
   -- character literal
-  loc=pos x=chrlit { fun (a) { assertValue(a, Const(x), loc) } }                                                     |
+  loc=pos x=chrlit { fun (a) { assertValue(a, Const(x), loc) } }                                                  |
 
   -- decimal constant
-  loc=pos x=decimal { fun (a) { assertValue(a, Const(stringInt(x)), loc) } }                                         |
+  loc=pos x=decimal { fun (a) { assertValue(a, Const(stringInt(x)), loc) } }                                      |
 
   -- identifier
-  x=lident args=inbr[s("("), list0(syntax(e=exp { e(Val) })), s(")")]? { fun (a) {
+  x=lident args=parens[list0(syntax(e=exp { e(Val) }))]? { fun (a) {
     case args of
       None          -> case a of
         Ref    -> Ref(x)
@@ -140,31 +152,31 @@ var primary = memo $ eta syntax (
       esac
       | Some (args) -> assertValue(a, Call(x, args))
     esac
-  } }                                                                                                                |
+  } }                                                                                                             |
 
   -- S-expression
-  loc=pos x=uident args=inbr[s("("), list0(syntax(e=exp { e(Val) })), s(")")]? { fun (a) { assertValue(a, Sexp(x, case args of
+  loc=pos x=uident args=parens[list0(syntax(e=exp { e(Val) }))]? { fun (a) { assertValue(a, Sexp(x, case args of
     None          -> { }
     | Some (args) -> args
-  esac), loc) } }                                                                                                    |
-  loc=pos -kSkip { fun (a) { assertVoid(a, Skip, loc) } }                                                            |
-  -kIf cond=exp -kThen expr1=scopeExpr expr2=els { fun (a) { If(cond(Val), expr1(a), expr2(a)) } }                   |
-  loc=pos -kWhile cond=exp -kDo body=scopeExpr -kOd { fun (a) { assertVoid(a, While(cond(Val), body(Void)), loc) } } |
-  loc=pos -kFor expr1=scopeExpr -s[","] cond=exp -s[","] expr2=exp -kDo expr3=scopeExpr -kOd {
+  esac), loc) } }                                                                                                 |
+  loc=pos kSkip { fun (a) { assertVoid(a, Skip, loc) } }                                                          |
+  kIf cond=exp kThen expr1=scopeExpr expr2=els { fun (a) { If(cond(Val), expr1(a), expr2(a)) } }                  |
+  loc=pos kWhile cond=exp kDo body=scopeExpr kOd { fun (a) { assertVoid(a, While(cond(Val), body(Void)), loc) } } |
+  loc=pos kFor expr1=scopeExpr s[","] cond=exp s[","] expr2=exp kDo expr3=scopeExpr kOd {
     fun (a) {
       distributeScope(expr1(Void), fun (expr1) {
         assertVoid(a, Seq(expr1, While(cond(Val), Seq(expr3(Void), expr2(Void)))), loc)
       })
     }
-  }                                                                                                                  |
-  loc=pos -kDo body=scopeExpr -kWhile cond=exp -kOd { fun (a) {
+  }                                                                                                               |
+  loc=pos kDo body=scopeExpr kWhile cond=exp kOd { fun (a) {
     distributeScope(body(Void), fun (body) { assertVoid(a, DoWhile(body, cond(Val)), loc) })
-  } }                                                                                                                |
-  inbr[s("("), scopeExpr, s(")")]),
+  } }                                                                                                             |
+  parens[scopeExpr]),
     els = memo $ eta syntax (
-    loc=pos -kFi { fun (a) { assertVoid(a, Skip, loc) } } |
-    -kElse scopeExpr -kFi                                 |
-    -kElif cond=exp -kThen expr1=scopeExpr expr2=els { fun (a) { If(cond(Val), expr1(a), expr2(a)) } }
+    loc=pos kFi { fun (a) { assertVoid(a, Skip, loc) } } |
+    inbr[kElse, scopeExpr, kFi]                          |
+    kElif cond=exp kThen expr1=scopeExpr expr2=els { fun (a) { If(cond(Val), expr1(a), expr2(a)) } }
   ),
     basic = memo $ eta (expr({ [Right, { [s(":="),
     fun (l, loc, r) {
@@ -177,7 +189,7 @@ var primary = memo $ eta syntax (
     [Left, map(binop, { "*", "/", "%" })]
   },
     postfix)),
-    postfix = memo $ eta syntax (loc=pos e=primary ps=(i=inbr[s("["), exp, s("]")] { Index(i(Val)) })* { fun (a) { foldl(fun (e, p) { case p of
+    postfix = memo $ eta syntax (loc=pos e=primary ps=(i=brackets[exp] { Index(i(Val)) })* { fun (a) { foldl(fun (e, p) { case p of
     Index (i) ->
       fun (a) {
         case a of
@@ -202,8 +214,8 @@ var primary = memo $ eta syntax (
     definition = memo $ eta syntax (kVar ds=list[syntax (lident (s["="] e=basic { e(Val) })?)] s[";"] { Var(ds) } |
     kVal ds=list[syntax (lident (s["="] e=basic { e(Val) }))] s[";"] { Val(ds) }                                  |
     kFun name=lident
-      args=inbr[s("("), list0(lident), s(")")]
-      body=inbr[s("{"), scopeExpr, s("}")] {
+      args=parens[list0(lident)]
+      body=curly[scopeExpr] {
       Fun(name, args, body(Weak))
     }
   ),
