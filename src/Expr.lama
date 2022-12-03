@@ -104,9 +104,10 @@ fun evalList (c, exprs) {
 fun eval (c@[s, w], expr) {
   fun unval (Val (v)) { v }
   case expr of
-    Assn (ElemRef (e, i), r) ->
-      case evalList(c, { e, i, r }) of [c, { Val (v), Val (i), Val (r) }] ->
-        v[i] := r; [c, Val (r)]
+    Assn (e1, e2) ->
+      case evalList(c, {e1, e2}) of
+        [[s, w], { Ref (x), Val (v)}] -> [[s <- [x, Val (v)], w], Val (v)]
+      | [c, { ArrayRef (arr, ind), Val (v)}] -> [c, Val (arr[ind] := v)]
       esac
   | Assn (e1, e2) ->
       case evalList (c, { e1, e2 }) of
@@ -180,6 +181,10 @@ fun eval (c@[s, w], expr) {
     | Elem (e, i) ->
         case evalList (c, { e, i }) of
           [c, { Val (e), Val (i) }]-> [c, Val (e[i])]
+        esac
+    | ElemRef (e, ind) ->
+        case evalList(c, {e, ind}) of
+          [c, { Val (arr), Val (ind) }] -> [c, ArrayRef (arr, ind)]
         esac
     | String (s) -> [c, Val (s)]
     | Set (i, e) -> case eval (c, e) of [[s, w], Val (v)] -> [[s <- [i, Val (v)], w], Val (v)] esac

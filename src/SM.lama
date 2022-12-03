@@ -147,7 +147,7 @@ fun eval (env, w, insns) {
             x : y : st -> eval ([evalOp (op, y, x) : st, cst, s, w], insns)
           esac
         | LD (x) -> eval ([lookup (s, x) : st, cst, s, w], insns)
-        | LDA (x) -> eval ([Ref (x) : st, cst, s, w], insns)
+        | LDA (x) -> eval ([x : st, cst, s, w], insns)
         | ST (x) -> case st of y : tail -> assign (s, x, y); eval (c, insns) esac
         | STI ->
           case st of
@@ -182,9 +182,15 @@ fun eval (env, w, insns) {
             i : a : st -> eval ([a[i] : st, cst, s, w], insns)
           esac
         | STA ->
-          case st of
-            v : i : a : st ->
-              a[i] := v; eval ([a : st, cst, s, w], insns)
+          case st of v : iorx : stackNew ->
+            case iorx of
+              i@#val ->
+                case stackNew of a : stackNew ->
+                  a[i] := v; eval ([v : stackNew, cst, s, w], insns)
+                esac
+            | x ->
+                assign(s, x, v); eval ([v : stackNew, cst, s, w], insns)
+            esac
           esac
         | STRING (strval) -> eval ([strval : st, cst, s, w], insns)
         | BUILTIN (f, n) ->
@@ -492,9 +498,8 @@ public fun compileSM (stmt) {
               [l1Used, env, xCode] ->
                 case compile (l2, env, e) of
                   [l2Used, env, eCode] ->
-                    var store = case x of ElemRef (_, _) -> STA | _ -> STI esac;
                     [false, env,
-                     xCode <+> label (l1, l1Used) <+> eCode <+> label (l2, l2Used) <+ store]
+                     xCode <+> label (l1, l1Used) <+> eCode <+> label (l2, l2Used) <+ STA]
                 esac
             esac
         esac

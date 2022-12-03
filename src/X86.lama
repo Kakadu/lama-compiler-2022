@@ -468,26 +468,26 @@ fun zeroReg (r) { Binop ("^", r, r) }
 
 fun compileBinop(op, x, y, env, code, s) {
   fun compileArithmetic (op) {
-    code <+ Mov (y, edx) <+ Binop (op, x, edx) <+ Mov (edx, s)
+    code <+ Sar1 (x) <+ Sar1 (y) <+ Mov (y, edx) <+ Binop (op, x, edx) <+> toFixedNum (edx) <+ Mov (edx, s)
   }
 
   var cmp = "cmp", al = "%al", dl = "%dl";
 
   fun compileComparison (op) {
-    code <+ zeroReg (eax) <+ Mov (y, edx) <+ Binop (cmp, x, edx)
-      <+ Set (suffix (op), al) <+ Mov (eax, s)
+    code <+ Sar1 (x) <+ Sar1 (y) <+ zeroReg (eax) <+ Mov (y, edx) <+ Binop (cmp, x, edx)
+      <+ Set (suffix (op), al) <+> toFixedNum (eax) <+ Mov (eax, s)
   }
 
   fun compileDivision () {
-    code <+ Mov (y, eax) <+ Cltd <+ IDiv (x)
+    code <+ Sar1 (x) <+ Sar1 (y) <+ Mov (y, eax) <+ Cltd <+ IDiv (x)
   }
 
   fun compileLogical (op) {
     fun reduceValToBin (r32, r8, value) {
-      listBuffer ({zeroReg (r32), Binop (cmp, value, r32), Set (suffix ("!="), r8)})
+      listBuffer ({zeroReg (r32), Sar1 (value), Binop (cmp, value, r32), Set (suffix ("!="), r8)})
     }
     code <+> reduceValToBin (eax, al, x) <+> reduceValToBin (edx, dl, y)
-         <+ Binop (op, eax, edx) <+ Mov (edx, s)
+         <+ Binop (op, eax, edx) <+> toFixedNum (edx) <+ Mov (edx, s)
   }
 
   fun compileOp () {
@@ -495,8 +495,8 @@ fun compileBinop(op, x, y, env, code, s) {
       "+"  -> compileArithmetic (op)
     | "-"  -> compileArithmetic (op)
     | "*"  -> compileArithmetic (op)
-    | "/"  -> compileDivision () <+ Mov (eax, s)
-    | "%"  -> compileDivision () <+ Mov (edx, s)
+    | "/"  -> compileDivision () <+> toFixedNum (eax) <+ Mov (eax, s)
+    | "%"  -> compileDivision () <+> toFixedNum (edx) <+ Mov (edx, s)
     | "&&" -> compileLogical (op)
     | "^"  -> compileLogical (op)
     | "!!" -> compileLogical (op)
@@ -554,7 +554,7 @@ fun compile (env, code) {
             esac
         | CONST (n) ->
             case allocate (env) of
-              [s, env] -> [env, code <+ Mov (L (n), s)]
+              [s, env] -> [env, code <+ Mov (L (makeBox (n)), s)]
             esac
         | ST (x) ->
             case env.pop of
@@ -569,9 +569,11 @@ fun compile (env, code) {
               [s, env] -> [env, code <+> move (env.loc (x), s)]
             esac
         | LDA (x) ->
-          case env.allocate of
-            [s, env] -> [env, code <+ Lea (env.loc (x), eax) <+ Mov (eax, s)]
-          esac
+            case env.allocate of [s, env] ->
+              case env.allocate of [s2, env] ->
+                [env, code <+ Lea(env.loc(x), eax) <+ Mov(eax, s) <+ Mov(eax, s2)]
+              esac
+            esac
         | BINOP (op) ->
             case pop2 (env) of
               [x, y, env] ->
@@ -583,7 +585,7 @@ fun compile (env, code) {
         | JMP (l) -> [env.setStack (l).setBarrier, code <+ Jmp (l)]
         | CJMP (c, l) ->
             case pop (env) of [s, env] ->
-              [env.setStack (l), code <+ zeroReg (edx) <+ Binop("cmp", edx, s) <+ CJmp (c, l)]
+              [env.setStack (l), code <+ zeroReg (edx) <+ Sar1 (s) <+ Binop("cmp", edx, s) <+ CJmp (c, l)]
             esac
         | DROP -> case env.pop of [_, env] -> [env, code] esac
         | DUP -> var duped = env.peek; case env.allocate of [s, env] -> [env, code <+ Mov (duped, s)] esac
@@ -631,7 +633,7 @@ fun compile (env, code) {
               [env, pushArgsCode] ->
                 case allocate (env) of
                   [s, env] ->
-                    [env, code <+> pushRegsCode <+> pushArgsCode <+ Push (L (n)) <+ Call ("Barray")
+                    [env, code <+> pushRegsCode <+> pushArgsCode <+ Push (L (makeBox (n))) <+ Call ("Barray")
                           <+ Binop ("+", L ((n + 1) * wordSize), esp) <+> popRegsCode <+> move (eax, s)]
                 esac
             esac
@@ -665,8 +667,8 @@ fun compile (env, code) {
               [env, pushArgsCode] ->
                 case allocate (env) of
                   [s, env] ->
-                    [env, code <+> pushRegsCode <+ Push (L (tagHash (x)))<+> pushArgsCode
-                          <+ Push (L (n + 1)) <+ Call ("Bsexp") <+ Binop ("+", L ((n + 2) * wordSize), esp)
+                    [env, code <+> pushRegsCode <+ Push (L (makeBox (tagHash (x))))<+> pushArgsCode
+                          <+ Push (L (makeBox (n + 1))) <+ Call ("Bsexp") <+ Binop ("+", L ((n + 2) * wordSize), esp)
                           <+> popRegsCode <+> move (eax, s)]
                 esac
             esac
