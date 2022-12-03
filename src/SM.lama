@@ -138,14 +138,14 @@ fun eval (env, w, insns) {
               eval ([evalOp (s, e1, e2) : other, cst, st, w], tl)
           esac
         | LD (x) -> eval ([lookup (st, x) : stack, cst, st, w], tl)
-        | LDA (x) -> eval ([Ref (x) : stack, cst, st, w], tl)
+        | LDA (x) -> eval ([x : stack, cst, st, w], tl)
         | ST (x) -> 
           case stack of
             v : other -> assign (st, x, v); eval (c, tl)
           esac
         | STI -> 
           case stack of
-            v : Ref (x) : other -> assign (st, x, v); eval ([v : other, cst, st, w], tl)
+            v : x : other -> assign (st, x, v); eval ([v : other, cst, st, w], tl)
           esac
         | CONST (n) -> eval ([n : stack, cst, st, w], tl)
         | LABEL (l) -> eval (c, tl)
@@ -160,7 +160,7 @@ fun eval (env, w, insns) {
               | ["z", _] -> eval ([stTl, cst, st, w], tl)
               esac
           esac
-        | DUP -> eval ([stack.fst, cst, st, w], tl)
+        | DUP -> eval ([stack.fst : stack, cst, st, w], tl)
         | DROP -> eval ([stack.snd, cst, st, w], tl)
         | GLOBAL (x) -> assign (st, Glb (x), 0); eval (c, tl)
         | BEGIN (f, nArgs, nLocs) ->
@@ -181,10 +181,12 @@ fun eval (env, w, insns) {
         | CALL (f, n) -> eval ([stack, [st, tl] : cst, st, w], fromLabel (env, f))
         | STA ->
           case stack of
-            v : i : a: stack -> 
-              case a of 
-                Sexp (_, a) -> a[i] := v; eval([a : stack, cst, st, w], tl)
-              | a -> a[i] := v; eval ([a: stack, cst, st, w], tl)
+            v : i : a : stack -> 
+              case a of
+                Sexp(_, a) -> a[i] := v; eval([a : stack, cst, st, w], tl)
+              | a@#array -> a[i] := v; eval([a : stack, cst, st, w], tl)
+              | a@#str -> a[i] := v; eval([a : stack, cst, st, w], tl)
+              | x -> assign(st, x, v); eval([a : stack, cst, st, w], tl)
               esac
           esac
         | BUILTIN (f, n) -> 
@@ -493,7 +495,7 @@ public fun compileSM (stmt) {
     case stmt of
       Skip              -> [false, env, emptyBuffer ()]
     | Var    (x)        -> [false, env, singletonBuffer (LD (lookupVal (env, x)))]
-    | Ref    (x)        -> [false, env, singletonBuffer (LDA (lookupVar (env, x)))]
+    | Ref    (x)        -> [false, env, singletonBuffer (LDA (lookupVar (env, x))) <+ DUP]
     | Const  (n)        -> [false, env, singletonBuffer (CONST (n))]
     | Seq   (s1, s2)    ->
       case env.genLabel of
@@ -505,13 +507,14 @@ public fun compileSM (stmt) {
               esac
           esac
       esac
+    | Assn (Ref (x), e) -> compile (lab, env, Set (x, e))
     | Assn (x, e)       ->
       case env.genLabels (2) of
         [labX, labE, env] ->
           case compile (labX, env, x) of
             [labXUsed, env, xCode] -> 
               case compile (labE, env, e) of
-                [labEUsed, env, eCode] -> [false, env, xCode <+> label (labX, labXUsed) <+> eCode <+> label (labE, labEUsed) <+ case x of ElemRef(_, _) -> STA | _ -> STI esac]
+                [labEUsed, env, eCode] -> [false, env, xCode <+> label (labX, labXUsed) <+> eCode <+> label (labE, labEUsed) <+ STA]
               esac
           esac
       esac
@@ -621,9 +624,12 @@ public fun compileSM (stmt) {
       esac
     | ElemRef (e, i) ->
       case env.genLabel of
-        [lab, env] -> 
-          case compile (lab, env, Seq (e, i)) of
-            [labUsed, env, code] -> [labUsed, env, code]
+        [labI, env] -> 
+          case compile (labI, env, e) of
+            [labUsedI, env, codeE] -> 
+              case compile (lab, env, i) of
+                [labUsed, env, codeI] -> [labUsed, env, codeE <+> label (labI, labUsedI) <+> codeI]
+              esac
           esac
       esac
     | Array (a) ->

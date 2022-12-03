@@ -491,7 +491,7 @@ fun compile (env, code) {
 
        CONST (n) ->
           case env.allocate of
-            [s, env] -> [env, code <+> move (L (n), s)]
+            [s, env] -> [env, code <+> move (L (makeBox (n)), s)]
           esac
       | LD (x) ->
           case env.allocate of
@@ -510,9 +510,18 @@ fun compile (env, code) {
         case env.pop2 of
           [x, y, env] ->
             case op of
-                "+" -> compileAddSubMul (x, y, op, env.allocate, code)
-              | "-" -> compileAddSubMul (x, y, op, env.allocate, code)
-              | "*" -> compileAddSubMul (x, y, op, env.allocate, code)
+                "+" -> 
+                  case env.allocate of
+                    [s, env] -> [env, code <+> compileAddSubMul (x, y, op, s) <+ Binop ("-", L (1), s)]
+                  esac
+              | "-" -> 
+                  case env.allocate of
+                    [s, env] -> [env, code <+> compileAddSubMul (x, y, op, s) <+ Binop ("+", L (1), s)]
+                  esac  
+              | "*" -> 
+                  case env.allocate of
+                    [s, env] -> [env, code <+ Sar1 (y) <+ Sar1 (x) <+> compileAddSubMul (x, y, op, s) <+> toFixedNum (s)]
+                  esac
               | "/" -> compileDivMod (x, y, op, env.allocate, code, eax)
               | "%" -> compileDivMod (x, y, op, env.allocate, code, edx)
               | "<" -> compileCmp (x, y, op, env.allocate, code)
@@ -523,13 +532,13 @@ fun compile (env, code) {
               | "!=" -> compileCmp (x, y, op, env.allocate, code)
               | "&&" -> 
                 case env.allocate of
-                  [s, env] -> [env, code <+> move (x, eax) <+ Binop (op, x, eax) <+> move (L (0), eax) <+ Set ("ne", "%al") 
+                  [s, env] -> [env, code <+ Sar1 (y) <+ Sar1 (x) <+> move (x, eax) <+ Binop (op, x, eax) <+> move (L (0), eax) <+ Set ("ne", "%al") 
                                          <+> move (y, edx) <+ Binop (op, y, edx) <+> move (L (0), edx) <+ Set ("ne", "%dl")
-                                         <+ Binop (op, edx, eax) <+ Set ("ne", "%al") <+> move (eax, s)]
+                                         <+ Binop (op, edx, eax) <+ Set ("ne", "%al") <+> move (eax, s) <+> toFixedNum (s)]
                 esac
               | "!!" -> 
                 case env.allocate of
-                  [s, env] -> [env, code <+> move (y, eax) <+ Binop (op, x, eax) <+> move (L (0), eax) <+ Set ("ne", "%al") <+> move (eax, s)]
+                  [s, env] -> [env, code <+ Sar1 (y) <+ Sar1 (x) <+> move (y, eax) <+ Binop (op, x, eax) <+> move (L (0), eax) <+ Set ("ne", "%al") <+> move (eax, s) <+> toFixedNum (s)]
                 esac
             esac    
         esac
@@ -540,7 +549,7 @@ fun compile (env, code) {
       | JMP (l) -> [env.setBarrier, code <+ Jmp (l)]
       | CJMP (cond, l) ->
         case env.pop of
-          [s, env] -> [env.setStack (l), code <+> move (s, eax) <+ Binop ("cmp", L(0), eax) <+ CJmp (cond, l)]
+          [s, env] -> [env.setStack (l), code <+> move (s, eax) <+ Sar1 (eax) <+ Binop ("cmp", L(0), eax) <+ CJmp (cond, l)]
         esac
       | DROP ->
         case env.pop of
@@ -589,7 +598,7 @@ fun compile (env, code) {
         case pushArgs (env, emptyBuffer (), n) of
           [env, pushCode] -> 
             case env.allocate of
-              [s, env] -> [env, code <+> pushLiveRegsCode <+> pushCode <+ Push (L (n)) <+ Call ("Barray") <+ Binop ("+", L ((n + 1) * wordSize), esp) <+> popLiveRegsCode <+> move (eax, s)]
+              [s, env] -> [env, code <+> pushLiveRegsCode <+> pushCode <+ Push (L (makeBox (n))) <+ Call ("Barray") <+ Binop ("+", L ((n + 1) * wordSize), esp) <+> popLiveRegsCode <+> move (eax, s)]
             esac
         esac
       | SEXP (x, n) -> 
@@ -598,8 +607,13 @@ fun compile (env, code) {
         case pushArgs (env, emptyBuffer (), n) of
           [env, pushCode] -> 
             case env.allocate of
-              [s, env] -> [env, code <+> pushLiveRegsCode <+ Push (L (tagHash (x))) <+> pushCode <+ Push (L (n + 1)) <+ Call ("Bsexp") <+ Binop ("+", L ((n + 2) * wordSize), esp) <+> popLiveRegsCode <+> move (eax, s)]
+              [s, env] -> [env, code <+> pushLiveRegsCode <+ Push (L (makeBox (tagHash (x)))) <+> pushCode <+ Push (L (makeBox (n + 1))) <+ Call ("Bsexp") <+ Binop ("+", L ((n + 2) * wordSize), esp) <+> popLiveRegsCode <+> move (eax, s)]
             esac
+        esac
+      | DUP ->
+        var x = env.peek;
+        case env.allocate of
+          [s, env] -> [env, code <+> move (x, s)]
         esac
       | _ -> failure ("codegeneration for instruction %s is not yet implemented\n", i.string)
       esac
@@ -620,16 +634,16 @@ fun pushArgs (env, code, n) {
   fi
 }
 
-fun compileAddSubMul (x, y, op, [s, env], code) {
-  [env, code <+> move (y, eax) <+ Binop (op, x, eax) <+> move (eax, s)]
+fun compileAddSubMul (x, y, op, s) {
+  move (y, eax) <+ Binop (op, x, eax) <+> move (eax, s)
 }
 
 fun compileDivMod (x, y, op, [s, env], code, reg) {
-  [env, code <+> move (y, eax) <+ Cltd <+ IDiv (x) <+> move (reg, s)]
+  [env, code <+ Sar1 (x) <+ Sar1 (y) <+> move (y, eax) <+ Cltd <+ IDiv (x) <+> move (reg, s) <+> toFixedNum (s)]
 }
 
 fun compileCmp (x, y, op, [s, env], code) {
-  [env, code <+> move(y, eax) <+ Binop ("cmp", x, eax) <+> move (L (0), eax) <+ Set (suffix (op), "%al") <+> move (eax, s)]
+  [env, code <+> move(y, eax) <+ Binop ("cmp", x, eax) <+> move (L (0), eax) <+ Set (suffix (op), "%al") <+> move (eax, s) <+> toFixedNum (s)]
 }
 
 -- A top-level codegeneration function. Takes a driver's environment and a stack machine program,
