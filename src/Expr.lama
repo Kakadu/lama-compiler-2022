@@ -101,10 +101,162 @@ fun evalList (c, exprs) {
   esac
 }
 
-fun eval (c@[s, w], expr) {
-  failure ("evalExpr not implemented\n")
+fun eval (c@[state, world], expr) {
+  
+  case expr of
+    Const (n) -> [c, n]
+  | Var (x) ->
+      case lookupVal (state, x) of
+        Val (v) -> [c, v]
+      esac
+  | Ref (x) -> [c, Ref (x)]
+  | Binop (op, l, r) ->
+      case evalList (c, {l, r}) of
+        [new_config, {x, y}] ->
+          [new_config, evalOp (op, x, y)]
+      esac
+  | Skip -> [c, 0]
+  | Assn (expr1, expr2) ->
+      case evalList (c, {expr1, expr2}) of
+        [[new_state, new_world], {Ref (x), v}] -> [[new_state <- [x, Val (v)], new_world], v]
+      | [new_config, {Ref (values, i), v}] -> [new_config, values[i] := v]
+      esac
+  | Seq (expr1, expr2) ->
+      case evalList (c, {expr1, expr2}) of
+        [new_config, {_, expr2_res}] ->
+          [new_config, expr2_res]
+      esac
+  | If (cond_expr, true_expr, false_expr) ->
+      case eval (c, cond_expr) of
+        [new_config, cond_val] ->
+          eval (new_config, if cond_val then true_expr else false_expr fi)
+      esac
+  | While (cond_expr, body_expr) ->
+      case eval (c, cond_expr) of
+        [new_config, cond_val] ->
+          if cond_val then
+            case eval (new_config, body_expr) of
+              [newest_config, _] -> eval (newest_config, While (cond_expr, body_expr))
+            esac
+          else
+            [new_config, 0]
+          fi
+      esac
+  | DoWhile (body_expr, cond_expr) ->
+      case eval (c, body_expr) of
+        [new_config, _] -> eval (new_config, While (cond_expr, body_expr))
+      esac
+  | Ignore (expr) ->
+      case eval (c, expr) of
+        [new_config, _] -> [new_config, 0]
+      esac
+  | Scope (ds, e)     ->
+      case eval([foldl(fun (state, d) {
+          case d of
+            Val(ns) -> addNames(state, ns)
+          | Var(ns) -> addNames(state, ns)
+          | Fun(n, as, b) -> addFunction(state, n, as, b)
+          esac 
+        }, enterScope(state), ds), world], e) of
+          [[state, world], v] -> [[leaveScope(state), world], v]
+      esac
+  | Call (name, args) ->
+      case lookupFun (state, name) of
+        Fun (arg_names, External) -> eval (c, Builtin (name, args))
+      | Fun (arg_names, body) ->
+          case evalList (c, args) of
+            [[new_state, new_world], arg_values] ->
+              case addArgumentValuesToScope (enterFunction (state), arg_names, arg_values) of
+                newest_state ->
+                  case eval ([newest_state, new_world], body) of
+                    [[newest_state, newest_world], value] ->
+                      [[leaveFunction (new_state, getGlobal (newest_state)), newest_world], value]
+                  esac
+              esac
+          esac
+      esac
+  | Builtin (name, args) ->
+      case evalList (c, args) of
+        [[new_state, new_world], values] ->
+          case evalBuiltin (name, values, new_world) of
+            [value, new_world] -> [[new_state, new_world], value]
+          esac
+      esac
+  | Set (variable, expr) ->
+      case eval (c, expr) of
+        [[new_state, new_world], value] -> [[new_state <- [variable, Val (value)], new_world], value]
+      esac
+  | String (s) -> [c, s]
+  | Array (exprs) ->
+      case evalList (c, exprs) of
+        [new_config, values] -> [new_config, listArray (values)]
+      esac
+  | Sexp (x, exprs) ->
+      case evalList (c, exprs) of
+        [new_config, values] -> [new_config, Sexp (x, listArray (values))]
+      esac
+  | Elem (x, i) ->
+      case evalList (c, {x, i}) of
+        [new_config, {x_val, i_val}] -> [c, (case x_val of
+                                                Sexp (_, values) -> values
+                                              | values@#str -> values
+                                              | values@#array -> values
+                                            esac)[i_val]]
+      esac
+  | ElemRef (x, i) ->
+      case evalList (c, {x, i}) of
+        [new_config, {x_val, i_val}] -> [c, Ref (case x_val of
+                                                Sexp (_, values) -> values
+                                              | values@#str -> values
+                                              | values@#array-> values
+                                            esac, i_val)]
+      esac
+  | Case (x, brs, loc) ->
+      case lookupVal (state, x) of
+        Val (v) ->
+          case brs of
+            {} -> error (sprintf ("match failure: %s", string (v)), loc)
+          | [p, br]:brs ->
+              if (match (p, v)) then
+                eval (c, br)
+              else
+                eval (c, Case (x, brs, loc))
+              fi
+          esac
+      esac     
+  esac
 }
 
+fun addArgumentValuesToScope (state, args, values) {
+  case [args, values] of
+    [arg:args, value:values] -> addArgumentValuesToScope (addName (state, arg, Val (value)), args, values)
+  | [{}, {}] -> state
+  esac
+}
+
+fun match (pattern, value) {
+  case [pattern, value] of
+    [Wildcard, _] -> true
+  | [Const (n), #val] -> n == value
+  | [Array (patterns), #array] ->
+      var values = arrayList (value);
+      if (size (patterns) == size (values)) then
+        foldl (fun (acc, [pattern, value]) {
+          acc && match (pattern, value)
+        }, true, zip (patterns, values))
+      else
+        false
+      fi
+  | [Sexp (x1, patterns), Sexp (x2, values)] ->
+      if (compare (x1, x2) == 0) then
+        match (Array (patterns), values)
+      else
+        false
+      fi
+  | [Named (_, pattern), _] -> match (pattern, value)
+  | _ -> false
+  esac
+}
 
 -- Evaluates a program with a given input and returns an output
 public fun evalExpr (input, expr) {
