@@ -116,7 +116,25 @@ fun distributeScope (expr, exprConstructor) {
   | _                   -> exprConstructor (expr)
   esac
 }
- 
+
+fun voidAsserter (retval, loc) { fun (a) { assertVoid (a, retval, loc) } }
+
+fun enscopedIfNeeded (ds, expr, loc) {
+  case ds of
+    {} -> expr
+  | _  -> voidAsserter (expandScope(ds, expr (Void)), loc)
+  esac
+}
+
+fun callNode(name, args) {
+  case name of
+    "read"   -> Builtin (name, args)
+  | "write"  -> Builtin (name, args)
+  | "length" -> Builtin (name, args)
+  | _        -> Call (name, args)
+  esac
+}
+
 var primary    = memo $ eta syntax (
                                       -- array constant
                                       loc=pos x=inbr[s("["), list0(syntax (e=exp {e(Val)})), s("]")] {fun (a) {assertValue (a, Array (x), loc)}}    |
@@ -138,7 +156,7 @@ var primary    = memo $ eta syntax (
                                                                                                                       | Void -> Ignore (Var (x))
                                                                                                                       | _    -> Var (x)
                                                                                                                       esac
-                                                                                                            | Some (args) -> assertValue (a, Call (x, args))
+                                                                                                            | Some (args) -> assertValue (a, callNode (x, args))
                                                                                                             esac
                                                                                                          }} |
 
@@ -147,7 +165,30 @@ var primary    = memo $ eta syntax (
                                                                                                                                                       None        -> {}
                                                                                                                                                     | Some (args) -> args
                                                                                                                                                     esac), loc)}} |
-                                      $(failure ("the rest of primary parsing in not implemented\n"))),
+                                      loc=pos e=inbr[s("("), scopeExpr, s(")")] {e} |
+                                      loc=pos kSkip { voidAsserter(Skip, loc) } |
+                                      loc=pos kIf e=exp kThen s1=scopeExpr kElse s2=scopeExpr kFi { fun(a) {If(e(Val), s1(a), s2(a))} } |
+                                      loc=pos kIf e=exp kThen s1=scopeExpr kFi {voidAsserter(If(e(Val), s1(Void), Skip), loc)}|
+                                      loc=pos kIf e=exp kThen s1=scopeExpr s2=elifs kFi { fun(a) {If(e(Val), s1(a), s2(a))} } |
+                                      loc=pos kWhile ds=definition* e=exp kDo s1=scopeExpr kOd
+                                        { enscopedIfNeeded(ds, voidAsserter(While(e(Val), s1(Void)), loc), loc) } |
+                                      loc=pos kFor ds=definition* s1=exp? s[","] e=exp s[","] s2=exp kDo s3=scopeExpr kOd
+                                        {
+                                          case s1 of
+                                            Some (s1) ->
+                                              enscopedIfNeeded(ds, voidAsserter(Seq(s1(Void), While(e(Val), Seq(s3(Void), s2(Void)))), loc), loc)
+                                          | None ->
+                                              enscopedIfNeeded(ds, voidAsserter(While(e(Val), Seq(s3(Void), s2(Void))), loc), loc)
+                                          esac
+                                        } |
+                                        loc=pos kDo d=scopeExpr kWhile e=exp kOd
+                                          { voidAsserter(distributeScope(d(Void), fun(inits) { DoWhile(inits, e(Val)) }), loc) }
+                                    ),
+      elifs = memo $ eta syntax (
+                                      loc=pos kElif e=exp kThen s1=scopeExpr s2=elifs { fun(a) {If(e(Val), s1(a), s2(a))} } |
+                                      loc=pos kElif e=exp kThen s1=scopeExpr kElse s2=scopeExpr { fun(a) {If(e(Val), s1(a), s2(a))} } |
+                                      loc=pos kElif e=exp kThen s1=scopeExpr { voidAsserter(If(e(Val), s1(Void), Skip), loc) }
+      ),
       basic      = memo $ eta (expr ({[Right, {[s (":="),
                                                 fun (l, loc, r) {
                                                   fun (a) {assertValue (a, Assn (l (Ref), r (Val)), loc)}
@@ -158,7 +199,7 @@ var primary    = memo $ eta syntax (
                                       [Left , map (binop, {"+", "-"})],
                                       [Left , map (binop, {"*", "/", "%"})]
                                      },
-                                     postfix)),
+                                     postfix) | postfix),
       postfix    = memo $ eta syntax (loc=pos e=primary ps=(i=inbr[s("["), exp, s("]")] {Index (i (Val))})* {fun (a) {foldl (fun (e, p) {                                                                                                                                                    case p of                                                                                   
                                                                                    Index (i) ->
                                                                                      fun (a) {
