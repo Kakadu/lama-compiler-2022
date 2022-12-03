@@ -125,14 +125,6 @@ fun eval (env, w, insns) {
     inner (n, {}, list)
   }
 
-  fun arrayAndSexp(a) {
-  case a of
-    a@#array -> a
-  | a@#str -> a
-  | Sexp(_, a) -> a
-  esac
-}
-
   -- Core interpreter: takes a configuration and a program, returns a configuration
   fun eval (c@[st, cst, s, w], insns) {
     case insns of
@@ -144,7 +136,7 @@ fun eval (env, w, insns) {
           r : l : nst -> eval ([evalOp (op, l, r) : nst, cst, s, w], insns)
         esac
         | LD (x) -> eval ([lookup (s, x) : st, cst, s, w], insns)
-        | LDA (x) -> eval ([Ref (x) : st, cst, s, w], insns)
+        | LDA (x) -> eval ([x : st, cst, s, w], insns)
         | ST (x) -> assign (s, x, hd (st)); eval (c, insns)
         | STI ->
           case st of 
@@ -191,6 +183,13 @@ fun eval (env, w, insns) {
         | ELEM ->
           case st of
             i : a : st -> 
+              fun arrayAndSexp(a) {
+                case a of
+                  a@#array -> a
+                | a@#str -> a
+                | Sexp(_, a) -> a
+                esac
+              }
               case arrayAndSexp(a) of
                 a -> eval ([a[i]:st, cst, s, w], insns)
               esac
@@ -198,11 +197,13 @@ fun eval (env, w, insns) {
         | STA ->
           case st of
             v : i : a : st ->
-            case arrayAndSexp(a) of
-              a -> 
-                a[i] := v;
-                eval ([a : st, cst, s, w], insns)
-            esac
+              case a of
+                #array -> a[i] := v
+              | #str -> a[i] := v
+              | Sexp(_, a) -> a[i] := v
+              | a -> assign (s, a, v)
+              esac;
+              eval ([a:st, cst, s, w], insns)
           esac
         | ARRAY (countArgs) -> 
           case take (st, countArgs) of
@@ -212,6 +213,7 @@ fun eval (env, w, insns) {
           case take (st, countArgs) of
             [st, vs] -> eval ([Sexp (x, listArray (vs)) : st, cst, s, w], insns)
           esac
+        | DUP -> eval ([st.hd : st, cst, s, w], insns)
         esac
     | {} -> c
     esac
@@ -532,7 +534,7 @@ public fun compileSM (stmt) {
     case stmt of
       Skip              -> [false, env, emptyBuffer ()]
     | Var    (x)        -> [false, env, singletonBuffer (LD (lookupVal (env, x)))]
-    | Ref    (x)        -> [false, env, singletonBuffer (LDA (lookupVar (env, x)))]
+    | Ref    (x)        -> [false, env, singletonBuffer (LDA (lookupVar (env, x))) <+ DUP]
     | Const  (n)        -> [false, env, singletonBuffer (CONST (n))]
     | Scope (defs, expr) -> 
       case addDefs (beginScope (env), defs) of 
@@ -577,8 +579,12 @@ public fun compileSM (stmt) {
         [env, {lcode, rcode}] -> [false, env, lcode <+> rcode <+ BINOP (op)]
       esac
     | Assn (l, r) -> 
-      case compileList (env, {l, r}) of
-        [env, {lcode, rcode}] -> [false, env, lcode <+> rcode <+ (case l of ElemRef(_, _) -> STA | _ -> STI esac)]
+      case l of 
+        Ref (l) -> compile (lab, env, Set (l, r))
+      | l ->
+        case compileList (env, {l, r}) of
+          [env, {lcode, rcode}] -> [false, env, lcode <+> rcode <+ STA]
+        esac
       esac
     | Seq (s1, s2) -> 
       case compileList (env, {s1, s2}) of

@@ -497,18 +497,16 @@ fun pushRegs (env, countArgs) {
 fun popRegs (env, countArgs) {
   foldr (fun (code, reg) {code <+ Pop (reg)}, emptyBuffer (), liveRegisters (env, countArgs))
 }
+
 -- Compiles stack machine code into a list of x86 instructions. Takes an environment
 -- and stack machine code, returns an updated environment and x86 code.
-
 fun compile (env, code) {  
   foldl (
     fun ([env, scode], i) {
       var code = scode <+ Meta ("# " ++ showSMInsn (i) ++ "\n");
-      case i of        
-        ST (x) ->
-        case env.pop of
-          [s, env] -> [env.push (x), code <+> move (s, env.loc (x))]
-        esac
+      case i of
+      
+        ST (x) -> [env, code <+> move (env.peek, env.loc (x))]  
       | STI ->
         case env.pop2 of
           [s1, s2, env] -> [env.push(s1), code <+> move (s1, I (0, s2))]
@@ -523,14 +521,14 @@ fun compile (env, code) {
         esac
       | CONST (n) -> 
         case env.allocate of
-          [s, env] -> [env, code <+> move (L (n), s)]
+          [s, env] -> [env, code <+> move (L (makeBox (n)), s)]
         esac
       | LABEL (l) -> 
         [if env.isBarrier then env.retrieveStack(l) else env fi, code <+ Label (l)]
       | JMP (l) -> [env.setBarrier, code <+ Jmp (l)]
       | CJMP (c, l) -> 
         case env.pop of
-          [s, env] -> [env.setStack(l), code <+> move (s, eax) <+ Binop ("cmp", L (0), eax) <+ CJmp (c, l)]
+          [s, env] -> [env.setStack(l), code <+ Sar1(s) <+> move (s, eax) <+ Binop ("cmp", L (0), eax) <+ CJmp (c, l)]
         esac
       | DROP   -> 
         case env.pop of
@@ -542,19 +540,22 @@ fun compile (env, code) {
             case env.allocate of
               [s, env] -> 
                 case op of 
-                  "/"  -> [env, code <+> move (s2, eax) <+ Cltd <+ IDiv (s1) <+> move (eax, s)]
-                | "%"  -> [env, code <+> move (s2, eax) <+ Cltd <+ IDiv (s1) <+> move (edx, s)]
-                | "+"  -> [env, code <+> move (s2, eax) <+ Binop (op, s1, eax) <+> move (eax, s)]
-                | "-"  -> [env, code <+> move (s2, eax) <+ Binop (op, s1, eax) <+> move (eax, s)]
-                | "*"  -> [env, code <+> move (s2, eax) <+ Binop (op, s1, eax) <+> move (eax, s)]
-                | "&&" -> [env, code <+> move (s1, eax) <+ Binop (op, s1, eax) <+> move (L (0), eax) 
-                                <+ Set ("ne", "%al") <+> move (s2, edx) <+ Binop (op, s2, edx) 
-                                <+> move (L (0), edx) <+ Set ("ne", "%dl") <+ Binop (op, eax, edx) 
-                                <+ Set ("ne", "%al") <+> move (eax, s)]
-                | "!!" -> [env, code <+> move (s2, eax) <+ Binop (op, s1, eax) <+> move (L (0), eax) 
-                                <+ Set ("ne", "%al") <+> move (eax, s)]
+                  "/"  -> [env, code <+ Sar1 (s1) <+ Sar1 (s2) <+> move (s2, eax) <+ Cltd <+ IDiv (s1) 
+                                <+> move (eax, s) <+> toFixedNum (s)]
+                | "%"  -> [env, code <+ Sar1 (s1) <+ Sar1 (s2) <+> move (s2, eax) <+ Cltd <+ IDiv (s1) 
+                                <+> move (edx, s) <+> toFixedNum (s)]
+                | "+"  -> [env, code <+> move (s2, eax) <+ Binop (op, s1, eax) <+> move (eax, s) <+ Dec (s)]
+                | "-"  -> [env, code <+> move (s2, eax) <+ Binop (op, s1, eax) <+> move (eax, s) <+ Binop("+", L(1), s)]
+                | "*"  -> [env, code <+ Sar1 (s1) <+ Sar1 (s2) <+> move (s2, eax) <+ Binop (op, s1, eax) 
+                                <+> move (eax, s) <+> toFixedNum (s)]
+                | "&&" -> [env, code <+ Sar1 (s1) <+ Sar1 (s2) 
+                                <+> move (s1, eax) <+ Binop (op, s1, eax) <+> move (L (0), eax) <+ Set ("ne", "%al") 
+                                <+> move (s2, edx) <+ Binop (op, s2, edx) <+> move (L (0), edx) <+ Set ("ne", "%dl") 
+                                <+ Binop (op, eax, edx) <+ Set ("ne", "%al") <+> move (eax, s) <+> toFixedNum(s)]
+                | "!!" -> [env, code <+ Sar1 (s1) <+ Sar1 (s2) <+> move (s2, eax) <+ Binop (op, s1, eax) <+> move (L (0), eax) 
+                                <+ Set ("ne", "%al") <+> move (eax, s) <+> toFixedNum(s)]
                 |  _  ->  [env, code <+> move (s2, eax) <+ Binop ("cmp", s1, eax) <+> move (L (0), eax) 
-                                <+ Set (suffix (op), "%al") <+> move (eax, s)]
+                                <+ Set (suffix (op), "%al") <+> move (eax, s) <+> toFixedNum (s)]
                 esac
             esac
         esac
@@ -611,7 +612,7 @@ fun compile (env, code) {
               [env, pushArgsCode] ->
                 case env.allocate of
                   [s, env] -> [env,
-                    code <+> pushRegsCode <+> pushArgsCode <+ Push (L (countArgs)) <+ Call ("Barray") 
+                    code <+> pushRegsCode <+> pushArgsCode <+ Push (L (makeBox (countArgs))) <+ Call ("Barray") 
                     <+ Binop ("+", L ((countArgs + 1) * wordSize), esp) <+> popRegsCode <+> move (eax, s)
                   ]
                 esac
@@ -627,13 +628,18 @@ fun compile (env, code) {
               [env, pushArgsCode] ->
                 case env.allocate of
                   [s, env] -> [env,
-                    code <+> pushRegsCode <+ Push (L (tagHash (x))) <+> pushArgsCode 
-                    <+ Push (L (countArgs + 1)) <+ Call ("Bsexp") <+ Binop ("+", L ((countArgs + 2) * wordSize), esp) 
+                    code <+> pushRegsCode <+ Push (L (makeBox (tagHash (x)))) <+> pushArgsCode 
+                    <+ Push (L (makeBox (countArgs + 1))) <+ Call ("Bsexp") <+ Binop ("+", L ((countArgs + 2) * wordSize), esp) 
                     <+> popRegsCode <+> move (eax, s)
                   ]
                 esac
             esac
           esac
+        esac
+      | DUP ->
+        var v = peek(env);
+        case allocate(env) of
+          [s, env] -> [env, code <+> move(v, s)]
         esac
       esac
     }, [env, emptyBuffer ()], code)
