@@ -27,21 +27,21 @@ var ebx = R (0),
 -- We need to know the word size to calculate offsets correctly
 var wordSize = 4;
 
--- We need to distinguish the following operand types: 
---    R (int)       -- hard register                    
---    S (int)       -- a position on the hardware stack 
---    M (string)    -- a named memory location          
+-- We need to distinguish the following operand types:
+--    R (int)       -- hard register
+--    S (int)       -- a position on the hardware stack
+--    M (string)    -- a named memory location
 --    L (int)       -- an immediate operand
 --    I (int, opnd) -- an indirect operand with offset
 
 -- Some x86 instruction (we do not need all of them):
---   Mov   (opnd, opnd)         -- copies a value from the first to the second operand  
+--   Mov   (opnd, opnd)         -- copies a value from the first to the second operand
 --   Lea   (opnd, opnd)         -- loads an address of the first operand into the second
---   Binop (string, opnd, opnd) -- makes a binary operation; note, the first operand   
+--   Binop (string, opnd, opnd) -- makes a binary operation; note, the first operand
 --                                 designates x86 operator, not the source language one
---   IDiv  (opnd)               -- x86 integer division, see instruction set reference 
---   Cltd                       -- see instruction set reference           
---   Set   (string, string)     -- sets a value from flags; the first operand is the   
+--   IDiv  (opnd)               -- x86 integer division, see instruction set reference
+--   Cltd                       -- see instruction set reference
+--   Set   (string, string)     -- sets a value from flags; the first operand is the
 --                                 suffix, which determines the value being set, the
 --                                 the second --- (sub)register name
 --   Jmp   (string)             -- unconditional jump to a label
@@ -49,13 +49,13 @@ var wordSize = 4;
 --   Label (string)             -- a label
 --   Push  (opnd)               -- pushes the operand on the hardware stack
 --   Pop   (opnd)               -- pops from the hardware stack to the operand
---   Call  (string)             -- calls a function by its name 
+--   Call  (string)             -- calls a function by its name
 --   Ret                        -- returns from a function
 --   Meta  (string)             -- metainformation (declarations, etc.)
 --
---   Dec   (opnd)               -- arithmetic correction: decrement  
---   Or1   (opnd)               -- arithmetic correction: or 0x0001                     
---   Sal1  (opnd)               -- arithmetic correction: shl 1           
+--   Dec   (opnd)               -- arithmetic correction: decrement
+--   Or1   (opnd)               -- arithmetic correction: or 0x0001
+--   Sal1  (opnd)               -- arithmetic correction: shl 1
 --   Sar1  (opnd)               -- arithmetic correction: shr 1
 
 -- Machine instruction printer
@@ -95,18 +95,18 @@ fun insnString (insn) {
   | Binop (op, s1, s2) -> sprintf ("\t%s\t%s,\t%s\n", binopString (op), opndString (s1), opndString (s2))
   | Lea   (s1, s2)     -> sprintf ("\tleal\t%s,\t%s\n", opndString (s1), opndString (s2))
   | Mov   (s1, s2)     -> sprintf ("\tmovl\t%s,\t%s\n", opndString (s1), opndString (s2))
-  | Push  (s)          -> sprintf ("\tpushl\t%s\n", opndString (s))
-  | Pop   (s)          -> sprintf ("\tpopl\t%s\n", opndString (s))
-  | Ret                -> "\tret\n"
-  | Call  (p)          -> sprintf ("\tcall\t%s\n", p)
-  | Label (l)          -> sprintf ("%s:\n", l)
-  | Jmp   (l)          -> sprintf ("\tjmp\t%s\n", l)
-  | CJmp  (c, l)       -> sprintf ("\tj%s\t%s\n", c, l)
-  | Meta  (m)          -> m
-  | Dec   (s)          -> sprintf ("\tdecl\t%s\n", opndString (s))
-  | Or1   (s)          -> sprintf ("\torl\t$0x0001,\t%s\n", opndString (s))
-  | Sal1  (s)          -> sprintf ("\tsall\t%s\n", opndString (s))
-  | Sar1  (s)          -> sprintf ("\tsarl\t%s\n", opndString (s))    
+  | Push  (s)    -> sprintf ("\tpushl\t%s\n", opndString (s))
+  | Pop   (s)    -> sprintf ("\tpopl\t%s\n", opndString (s))
+  | Ret          -> "\tret\n"
+  | Call  (p)    -> sprintf ("\tcall\t%s\n", p)
+  | Label (l)    -> sprintf ("%s:\n", l)
+  | Jmp   (l)    -> sprintf ("\tjmp\t%s\n", l)
+  | CJmp  (c, l) -> sprintf ("\tj%s\t%s\n", c, l)
+  | Meta  (m)    -> m
+  | Dec   (s)    -> sprintf ("\tdecl\t%s\n", opndString (s))
+  | Or1   (s)    -> sprintf ("\torl\t$0x0001,\t%s\n", opndString (s))
+  | Sal1  (s)    -> sprintf ("\tsall\t%s\n", opndString (s))
+  | Sar1  (s)    -> sprintf ("\tsarl\t%s\n", opndString (s))
   esac
 }
 
@@ -467,127 +467,137 @@ fun toFixedNum (r) {
 -- Compiles stack machine code into a list of x86 instructions. Takes an environment
 -- and stack machine code, returns an updated environment and x86 code.
 fun compile (env, code) {
-  fun compile (env, code) {
-    fun popLiveRegs (env, depth) {
-      listBuffer (reverse (map (fun (reg) {Pop (reg)}, liveRegisters (env, depth))))
-    }
-    fun pushLiveRegs (env, depth) {
-      listBuffer (map (fun (reg) {Push (reg)}, liveRegisters (env, depth)))
-    }
-    fun pushArgs (env, n) {
-      fun helper (env, n, prefix) {
-        if n == 0 then [env, prefix]
-        else case pop (env) of
-        [s, env] -> helper (env, n - 1, prefix <+ Push (s))
-        esac
-        fi
-      }
-      helper (env, n, emptyBuffer ())
-    }
+  fun isOneOf (x, l) {
+    case find (fun (e) {compare (x, e) == 0}, l) of
+      None -> false
+    | _    -> true
+    esac
+  }
+  fun saveRegs (env, depth) {
+    foldl (fun ([pushes, pops], r) {
+      [pushes <+ Push (r),
+        singletonBuffer (Pop (r)) <+> pops]
+    }, [emptyBuffer (), emptyBuffer ()], liveRegisters (env, depth))
+  }
 
+  fun pushArgs (env, pushArgsCode, n) {
+    if n == 0
+    then [env, pushArgsCode]
+    else
+      case pop (env) of
+      [x, env] -> pushArgs (env, pushArgsCode <+ Push (x), n - 1)
+      esac
+    fi
+  }
+  fun compile (env, code) {
     foldl (
       fun ([env, scode], i) {
         var code = scode <+ Meta ("# " ++ showSMInsn (i) ++ "\n");
-
         case i of
-          CONST (n)                   ->
+          CONST (n)            ->
             case allocate (env) of
-            [s, env] -> [env, code <+> move (L (n), s)]
+            [s, env] -> [env, code <+> move (L (makeBox (n)), s)]
             esac
-        | LD (x)                      ->
+        | GLOBAL (x)           -> [addGlobal (env, x), code]
+        | LD (x)               ->
           case allocate (env) of
           [s, env] -> [env, code <+> move (loc (env, x), s)]
           esac
-        | LDA (x)                     ->
+        | LDA (x)              ->
           case allocate (env) of
-          [s, env] -> [env, code <+ if memOpnd (s) then Lea (loc (env, x), eax) <+> move (eax, s) else Lea (loc (env, x), s) fi]
+          [s, env] -> [env, code <+ Lea (loc (env, x), eax) <+> move (eax, s)]
           esac
-        | ST (x)                      -> [env, code <+> move (peek (env), loc (env, x))]
-        | STI                         ->
+        | ST (x)               -> [env, code <+> move (peek (env), loc (env, x))]
+        | STI                  ->
           case pop2 (env) of
-          [v, x, env] -> [push (env, v), code <+> move (v, I (0, x))]
+          [z, a, env] -> [push (env, z), code <+> move (z, I (0, a))]
           esac
-        | BINOP (op)                  ->
-          case pop2 (env) of
-          [y, x, env] -> [push (env, x), code <+>
-            if compare (op, "+") == 0 !! compare (op, "-") == 0 !! compare (op, "*") == 0 then
-              if memOpnd (x) == false then singletonBuffer (Binop (op, y, x))
-              elif memOpnd (y) == false && compare (op, "-") != 0 then Binop (op, x, y) <+> move (y, x)
-              else move (x, eax) <+ Binop (op, y, eax) <+> move (eax, x)
-              fi
-            elif compare (op, "/") == 0 !! compare (op, "%") == 0 then
-              move (x, eax) <+ Cltd <+ IDiv (y) <+> move (if compare (op, "/") == 0 then eax else edx fi, x)
-            elif compare (op, "<") == 0 !! compare (op, ">") == 0 !!
-              compare (op, "<=") == 0 !! compare (op, ">=") == 0 !!
-              compare (op, "==") == 0 !! compare (op, "!=") == 0 then
-              singletonBuffer (Binop ("^", edx, edx)) <+>
-                if memOpnd (x) && memOpnd (y) then move (x, eax) <+ Binop ("cmp", y, eax)
-                else singletonBuffer (Binop ("cmp", y, x)) fi
-                <+ Set (suffix (op), "%dl") <+> move (edx, x)
-            elif compare (op, "&&") == 0 !! compare (op, "!!") == 0 then
+        | BINOP (op)           -> case pop2 (env) of
+        [y, x, env] -> (
+          var compiled =
+            if
+              isOneOf (op, {"+"}) then
+              move (x, eax) <+ Binop (op, y, eax) <+> move (eax, x) <+ Binop ("-", L (1), x)
+            elif isOneOf (op, {"-"}) then
+              move (x, eax) <+ Binop (op, y, eax) <+> move (eax, x) <+ Binop ("+", L (1), x)
+            elif isOneOf (op, {"*"}) then
+              singletonBuffer (Sar1 (x)) <+ Sar1 (y) <+> move (x, eax) <+ Binop (op, y, eax) <+> move (eax, x) <+> toFixedNum (x)
+            elif isOneOf (op, {"/", "%"}) then
+              singletonBuffer (Sar1 (x)) <+ Sar1 (y) <+> move (x, eax) <+ Cltd <+ IDiv (y)
+                <+> move (if compare (op, "/") == 0 then eax else edx fi, x) <+> toFixedNum (x)
+            elif isOneOf (op, {"<", ">", "<=", ">=", "==", "!="}) then
+              move (x, eax) <+ Binop ("^", edx, edx) <+ Binop ("cmp", y, eax) <+ Set (suffix (op), "%dl")
+                <+> move (edx, x) <+> toFixedNum (x)
+            elif isOneOf (op, {"&&", "!!"}) then
               listBuffer ({
-                Binop ("^", eax, eax), Binop ("cmp", L (0), x), Set (suffix ("!="), "%al"),
-                Binop ("^", edx, edx), Binop ("cmp", L (0), y), Set (suffix ("!="), "%dl"),
-                Binop (op, eax, edx)
-              }) <+> move (edx, x)
-            else failure ("unknown binop %s\n", op)
+                Sar1 (x), Binop ("^", eax, eax), Binop ("cmp", x, eax), Set (suffix ("!="), "%al"),
+                Sar1 (y), Binop ("^", edx, edx), Binop ("cmp", y, edx), Set (suffix ("!="), "%dl"),
+                Binop (op, edx, eax), Mov (eax, x)
+              }) <+> toFixedNum (x)
+            else
+              failure ("unkown binary operator %s\n", op)
             fi
-          ]
-          esac
-        | LABEL (l)                   -> [if isBarrier (env) then retrieveStack (env, l) else env fi, code <+ Label (l)]
-        | JMP(l)                      -> [setBarrier (setStack (env, l)), code <+ Jmp (l)]
-        | CJMP (c, l)                 ->
+          ;
+          [push (env, x), code <+> compiled]
+        )
+        esac
+        | LABEL (l)            -> [if isBarrier (env) then retrieveStack (env, l) else env fi, code <+ Label (l)]
+        | JMP (l)              -> [setBarrier (env), code <+ Jmp (l)]
+        | CJMP (c, l)          ->
           case pop (env) of
-          [s, env] -> [setStack (env, l), code <+> if memOpnd (s) then move (s, eax) <+ Binop ("&&", eax, eax) else singletonBuffer (Binop ("&&", s, s)) fi <+ CJmp (c, l)]
+          [x, env] -> [setStack (env, l), code <+ Sar1 (x) <+> move (x, eax) <+ Binop ("&&", eax, eax) <+ CJmp (c, l)]
           esac
-        | DROP                        ->
+        | DUP                  ->
+          case allocate (env) of
+          [s, env] -> [env, code <+> move (peek (env), s)]
+          esac
+        | DROP                 ->
           case pop (env) of
-          [_, env] -> [env, code]
+          [x, env] -> [env, code]
           esac
-        | CALL (f, nArgs)             ->
-          var pushLiveRegsCode = pushLiveRegs (env, nArgs);
-          var popLiveRegsCode = popLiveRegs (env, nArgs);
-          case pushArgs (env, nArgs) of
-          [env, pushArgsCode] ->
-            case allocate (env) of
-            [s, env] -> [env,
-              code
-                <+> pushLiveRegsCode
-                <+> pushArgsCode
-                <+ Call (f)
-                <+ Binop ("+", L (nArgs * wordSize), esp)
-                <+> popLiveRegsCode
-                <+> move (eax, s)
-            ]
-            esac
-          esac
-        | BEGIN (f, nParams, nLocals) -> [enterFunction (env, f, nLocals), code <+> prologue (f)]
-        | END                         ->
-          case epilogue (env)
-          of [env, epilogueCode] -> [env, code <+> epilogueCode]
-          esac
-        | GLOBAL (x)                  -> [addGlobal (env, x), code]
-        | ARRAY (n)                   ->
-          var pushLiveRegsCode = pushLiveRegs (env, 0);
-          var popLiveRegsCode = popLiveRegs (env, 0);
-          case pushArgs (env, n) of
-          [env, pushElmsCode] ->
-            case allocate (env) of
-            [s, env] ->
-              [env,
+        | CALL (fLab, na)      ->
+          case saveRegs (env, na) of
+          [pushRegsCode, popRegsCode] ->
+            case pushArgs (env, emptyBuffer (), na) of
+            [env, pushArgsCode] ->
+              case allocate (env) of
+              [x, env] -> [env,
                 code
-                  <+> pushLiveRegsCode
-                  <+> pushElmsCode
-                  <+ Push (L (n))
-                  <+ Call ("Barray")
-                  <+ Binop ("+", L ((n + 1) * wordSize), esp)
-                  <+> popLiveRegsCode
-                  <+> move (eax, s)
-              ]
+                  <+> pushRegsCode
+                  <+> pushArgsCode
+                  <+ Call (fLab)
+                  <+ Binop ("+", L (wordSize * na), esp)
+                  <+> popRegsCode
+                  <+> move (eax, x)]
+              esac
             esac
           esac
-        | STRING (string)             ->
-          case addString (env, string) of
+        | BEGIN (fLab, na, nl) -> [enterFunction (env, fLab, nl), code <+> prologue (fLab)]
+        | END                  ->
+          case epilogue (env) of
+          [env, endCode] -> [env, code <+> endCode]
+          esac
+        | SEXP (x, n)          ->
+          case saveRegs (env, 0) of
+          [pushRegsCode, popRegsCode] ->
+            case pushArgs (env, emptyBuffer (), n) of
+            [env, pushElemsCode] ->
+              case allocate (env) of
+              [s, env] ->
+                [env, code
+                  <+> pushRegsCode
+                  <+ Push (L (makeBox (tagHash (x))))
+                  <+> pushElemsCode
+                  <+ Push (L (makeBox (n + 1)))
+                  <+ Call ("Bsexp")
+                  <+ Binop ("+", L (wordSize * (n + 2)), esp)
+                  <+> popRegsCode
+                  <+> move (eax, s)]
+              esac
+            esac
+          esac
+        | STRING (x)           ->
+          case addString (env, x) of
           [env, sName] ->
             case allocate (env) of
             [s, env] ->
@@ -596,38 +606,27 @@ fun compile (env, code) {
               esac
             esac
           esac
-        | STA                         ->
-          case compile (env, {CALL ("Bsta", 3)}) of
-          [env, callCode] -> [env, code <+> callCode]
-          esac
-        | ELEM                        ->
-          case compile (env, {CALL ("Belem", 2)}) of
-          [env, callCode] -> [env, code <+> callCode]
-          esac
-        | BUILTIN (fLab, n)           ->
-          case compile (env, {CALL ("L" ++ fLab, n)}) of
-          [env, callCode] -> [env, code <+> callCode]
-          esac
-        | SEXP (x, n)                 ->
-          var pushLiveRegsCode = pushLiveRegs (env, 0);
-          var popLiveRegsCode = popLiveRegs (env, 0);
-          case pushArgs (env, n) of
-          [env, pushElmsCode] ->
-            case allocate (env) of
-            [s, env] ->
-              [env,
-                code
-                  <+> pushLiveRegsCode
-                  <+ Push (L (tagHash (x)))
-                  <+> pushElmsCode
-                  <+ Push (L (n + 1))
-                  <+ Call ("Bsexp")
-                  <+ Binop ("+", L ((n + 2) * wordSize), esp)
-                  <+> popLiveRegsCode
-                  <+> move (eax, s)
-              ]
+        | ARRAY (n)            ->
+          case saveRegs (env, 0) of
+          [pushRegsCode, popRegsCode] ->
+            case pushArgs (env, emptyBuffer (), n) of
+            [env, pushElemsCode] ->
+              case allocate (env) of
+              [s, env] ->
+                [env, code
+                  <+> pushRegsCode
+                  <+> pushElemsCode
+                  <+ Push (L (makeBox (n)))
+                  <+ Call ("Barray")
+                  <+ Binop ("+", L (wordSize * (n + 1)), esp)
+                  <+> popRegsCode
+                  <+> move (eax, s)]
+              esac
             esac
           esac
+        | STA                  -> case compile (env, {CALL ("Bsta", 3)}) of [env, callCode] -> [env, code <+> callCode] esac
+        | ELEM                 -> case compile (env, {CALL ("Belem", 2)}) of [env, callCode] -> [env, code <+> callCode] esac
+        | BUILTIN (fLab, n)    -> case compile (env, {CALL ("L" ++ fLab, n)}) of [env, callCode] -> [env, code <+> callCode] esac
         esac
       }, [env, emptyBuffer ()], code)
   }
