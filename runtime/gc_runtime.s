@@ -30,14 +30,23 @@ L__gc_init:		movl	%esp, __gc_stack_bottom
 // then  set @__gc_stack_top to %ebp
 // else  return
 __pre_gc:
-			call nimpl
+  movl __gc_stack_top, %eax
+  cmpl $0, %eax
+  jne top_filled
+  movl %ebp, __gc_stack_top
+top_filled:
+  ret
 
 // ==================================================
 // if __gc_stack_top was set by one of the callers
 // then return
 // else set __gc_stack_top to 0
 __post_gc:
-			call nimpl
+  cmpl %ebp, __gc_stack_top
+  jne top_not_ours
+  movl $0, __gc_stack_top
+top_not_ours:
+  ret
 
 // ==================================================
 // Scan stack for roots
@@ -45,4 +54,17 @@ __post_gc:
 // till __gc_stack_bottom
 // and calls gc_test_and_copy_root for each found root
 __gc_root_scan_stack:
-			call nimpl
+  movl __gc_stack_top, %eax
+
+scan_loop:
+  addl $4, %eax
+  cmpl %eax, __gc_stack_bottom
+  je scan_done
+
+  pushl %eax
+  call gc_test_and_copy_root
+  popl %eax
+  jmp scan_loop
+
+scan_done:
+  ret

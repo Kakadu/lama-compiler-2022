@@ -101,8 +101,133 @@ fun evalList (c, exprs) {
   esac
 }
 
+fun evalWhile(c, cond, body) {
+  case eval(c, cond) of [c, Var(v)] ->
+    if v then
+      case eval(c, body) of [c, _] -> evalWhile(c, cond, body) esac
+    else
+      c
+    fi
+  esac
+}
+
+fun cmpArray(e, pat) {
+  if length(e) != length(pat)
+  then false
+  else
+    foldl(cmp, true, zip(arrayList(e), arrayList(pat)))
+  fi
+}
+
+fun cmp (acc, [e, pat]) {
+  if acc then
+    case pat of
+      Wildcard -> true
+    | Named (_, pat) -> cmp(acc, [e, pat])
+    | Const (patN) ->
+        case e of
+          patN -> true
+        | _    -> false
+        esac
+    | Array (patArr) ->
+        case e of
+          arr@#array -> cmpArray(arr, listArray(patArr))
+        | _          -> false
+        esac
+    | Sexp (patTag, patArr) ->
+        case e of
+          Sexp(tag, arr) -> (compare(patTag, tag) == 0) && cmpArray(arr, listArray(patArr))
+        | _                 -> false
+        esac
+    esac
+  else
+    false
+  fi
+}
+
+fun findMatch(e, brs) {
+  case brs of [pat, rhs] : brs ->
+    if cmp(true, [e, pat])
+    then rhs
+    else findMatch(e, brs)
+    fi
+  esac
+}
+
 fun eval (c@[s, w], expr) {
-  failure ("evalExpr not implemented\n")
+  case expr of
+    Assn (e1, e2) ->
+      case evalList(c, {e1, e2}) of
+        [[s, w], {Ref(x), Var(v)}]             -> [[s <- [x, Var(v)], w], Var(v)]
+      | [c,      {ArrayRef(arr, ind), Var(v)}] -> arr[ind] := v; [c, Var(v)]
+      esac
+  | Seq (e1, e2) ->
+      case evalList(c, {e1, e2}) of [c, {_, v}] -> [c, v] esac
+  | Skip -> [c, Void]
+  | If (e1, e2, e3) ->
+      case eval(c, e1) of [c, Var(cond)] -> if cond then eval(c, e2) else eval(c, e3) fi esac
+  | While (cond, body) -> [evalWhile(c, cond, body), Void]
+  | DoWhile (body, cond) -> case eval(c, body) of [c, _] -> [evalWhile(c, cond, body), Void] esac
+  | Var (x) -> [c, case lookup(s, x) of Var(v) -> Var(v) esac]
+  | Ref (x) -> [c, Ref(x)]
+  | Const (n) -> [c, Var(n)]
+  | Binop (op, l, r) ->
+      case evalList(c, {l, r}) of [c, {Var(l), Var(r)}] -> [c, Var(evalOp(op, l, r))] esac
+  | Ignore (e) -> case eval(c, e) of [c, _] -> [c, Void] esac
+  | Scope (ds, e) ->
+      fun addDefs(s, ds) {
+        foldl(
+          fun(s, d) {
+            case d of
+              Var (ds) -> addNames(s, ds)
+            | Val (ds) -> addNames(s, ds)
+            | Fun (name, args, body) -> addFunction(s, name, args, body)
+            esac
+          }, s, ds)
+      }
+
+      case eval([addDefs(enterScope(s), ds), w], e) of [[s, w], v] -> [[leaveScope(s), w], v] esac
+
+  | Call (fname, args) ->
+      case lookup(s, fname) of
+        Fun (_, External) ->
+          eval(c, Builtin(fname, args))
+      | Fun (argNames, body) ->
+          case evalList(c, args) of [[s, w], args] ->
+            fun copyArg(s, [argName, arg]) {
+              addName(s, argName, arg)
+            }
+
+            case eval([foldl(copyArg, enterScope(enterFunction(s)), zip(argNames, args)), w], body) of
+              [[sFun, w], Var(v)] -> [[leaveFunction(s, getGlobal(sFun)), w], Var(v)]
+            esac
+          esac
+      esac
+  | Builtin (name, args) ->
+      case evalList(c, args) of [[s, w], l] ->
+        case evalBuiltin(name, map(fun(Var(x)) {x}, l), w) of [v, w] ->
+          [[s, w], Var(v)]
+        esac
+      esac
+  | Array (l) ->
+      case evalList(c, l) of [c, vals] -> [c, Var(listArray(map(fun(Var(x)) {x}, vals)))] esac
+  | Elem (e, ind) ->
+      case evalList(c, {e, ind}) of
+        [c, {Var(Sexp(_, arr)), Var(ind)}] -> [c, Var(arr[ind])]
+      | [c, {Var(arr), Var(ind)}] -> [c, Var(arr[ind])]
+      esac
+  | ElemRef (e, ind) ->
+      case evalList(c, {e, ind}) of
+        [c, {Var(Sexp(_, arr)), Var(ind)}] -> [c, ArrayRef(arr, ind)]
+      | [c, {Var(arr), Var(ind)}] -> [c, ArrayRef(arr, ind)]
+      esac
+  | String (s) -> [c, Var(s)]
+  | Set (ident, e) ->
+      case eval(c, e) of [[s, w], Var(v)] -> [[s <- [ident, Var(v)], w], Var(v)] esac
+  | Sexp(name, l) -> case eval(c, Array(l)) of [c, Var(arr)] -> [c, Var(Sexp(name, arr))] esac
+  | Case (scr, brs) ->
+      case eval(c, scr) of [c, Var(scr)] -> eval(c, findMatch(scr, brs)) esac
+  esac
 }
 
 
