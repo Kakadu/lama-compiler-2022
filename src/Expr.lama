@@ -86,7 +86,14 @@ fun addNames (state, names) {
 fun addFunction (state, name, args, body) {
   state.addName (name, Fun (args, body))
 }
-                                        
+
+fun extractVals(vs) {
+  case vs of
+    {} -> {}
+  | Val(v) : vs -> v : extractVals(vs)
+  esac
+}
+
 -- Evaluates a list of expressions, properly threading a configurations.
 -- Returns the final configuration and the list of values
 fun evalList (c, exprs) {
@@ -101,8 +108,131 @@ fun evalList (c, exprs) {
   esac
 }
 
+fun getArr(x) {
+  case x of
+    Sexp(_, x) -> x
+  | #array -> x
+  | #str -> x
+  esac
+}
+
+fun arrayMatchesList(scrutArr, patList) {
+  if length(scrutArr) != size(patList)
+  then
+    false
+  else
+    var res = true;
+    for var i = 0;, i < length(scrutArr) && res, i := i + 1; patList := tl(patList)
+    do
+      res := matches(scrutArr[i], hd(patList))
+    od; res
+  fi
+}
+
+fun matches(scrut, pat) {
+  case [scrut, pat] of
+    [_,                    Wildcard]            -> true
+  | [_,                    Named(_, pat)]       -> matches(scrut, pat)
+  | [scrut@#val,           Const (pat)]         -> scrut == pat
+  | [scrutArr@#array,      Array(patList)]      -> arrayMatchesList(scrutArr, patList)
+  | [Sexp(tag1, scrutArr), Sexp(tag2, patList)] -> (compare(tag1, tag2) == 0) && arrayMatchesList(scrutArr, patList)
+  | _                                           -> false
+  esac
+}
+
+fun evalBranches(c, scrut, [pat, res] : branches) {
+  if matches(scrut, pat) then eval(c, res) else evalBranches(c, scrut, branches) fi
+}
+
 fun eval (c@[s, w], expr) {
-  failure ("evalExpr not implemented\n")
+  case expr of
+    ElemRef(e, i) ->
+      case evalList(c, {e, i}) of [c, {Val(a), Val(i)}] -> [c, ElemRef(getArr(a), i)] esac
+  | Assn (l, r) ->
+      case evalList(c, {l, r}) of
+        [c, {ElemRef(a, i), Val(v)}] -> a[i] := v; [c, Val(v)]
+      | [[s, w], {Ref(variable), Val(value)}] -> [[s <- [variable, Var(value)], w], Val(value)]
+      esac
+  | Seq (l, r) ->
+      case eval (c, l) of [c, _] ->
+        case eval (c, r) of [c, retval] ->
+          [c, retval]
+        esac
+      esac
+  | Skip -> [c, Void]
+  | Read (x) -> case readWorld(w) of [v, w] -> [[s <- [x, Var(v)], w], Void] esac
+  | Write (e) -> case eval (c, e) of [c@[s, w], Val(value)] -> [[s, writeWorld(value, w)], Void] esac
+  | If (cond, t, f) ->
+      case eval (c, cond) of [c, Val(value)] ->
+        if value then
+          eval (c, t)
+        else
+          eval (c, f)
+        fi
+      esac
+  | While (cond, body) ->
+      while case eval (c, cond) of [conf@[s, w], Val(value)] -> c := conf; value esac do
+        case eval (c, body) of [conf, _] -> c := conf esac
+      od; [c, Void]
+  | DoWhile (body, cond) ->
+      case eval (c, body) of [conf, _] -> c := conf esac;
+      while case eval (c, cond) of [conf@[s, w], Val(value)] -> c := conf; value esac do
+        case eval (c, body) of [conf, _] -> c := conf esac
+      od; [c, Void]
+  | Var (x) -> [c, Val(case lookup(s, x) of Var(v) -> v esac)]
+  | Ref (x) -> [c, Ref(x)]
+  | Const (n) -> [c, Val(n)]
+  | Binop (op, l, r) ->
+      case eval (c, l) of [c, Val(lv)] ->
+        case eval (c, r) of [c, Val(rv)] ->
+          [c, Val(evalOp(op, lv, rv))]
+        esac
+      esac
+  | Ignore (e) -> case eval (c, e) of [c, _] -> [c, Void] esac
+  | Scope (defs, e) ->
+      fun addFunDefs(s, fdefs) {
+        fun addFunDef(s, Fun(f, args, body)) {
+          addFunction(s, f, args, body)
+        }
+
+        foldl(addFunDef, s, fdefs)
+      }
+
+      case defs of Var(vdefs) : fdefs ->
+        case eval([addFunDefs(addNames(enterScope(s), vdefs), fdefs), w], e) of [[s, w], v] ->
+          [[leaveScope(s), w], v]
+        esac
+      esac
+  | Call (f, args) ->
+      fun setArg(s, [name, Val(v)]) {
+        addName(s, name, Var(v))
+      }
+
+
+      case evalList(c, args) of [[s, w], args] ->
+          case lookup(s, f) of
+            Fun(_, External) ->
+              case evalBuiltin(f, extractVals(args), w) of [v, w] ->
+                [[s, w], Val(v)]
+              esac
+          | Fun(argNames, body) ->
+              case eval([foldl(setArg, enterScope(enterFunction(s)), zip(argNames, args)), w], body) of
+                [[fs, w], Val(retval)] -> [[leaveFunction(s, getGlobal(fs)), w], Val(retval)]
+              esac
+          esac
+      esac
+  | Array (x) ->
+      case evalList(c, x) of [c, vals] -> [c, Val(listArray(extractVals(vals)))] esac
+
+  | String (s) -> [c, Val(s)]
+  | Elem (e, i) ->
+      case evalList(c, {e, i}) of [c, {Val(e), Val(i)}]-> [c, Val(getArr(e)[i])] esac
+  | Sexp (tag, x) ->
+      case evalList(c, x) of [c, vals] -> [c, Val(Sexp(tag, listArray(extractVals(vals))))] esac
+  | Set (x, e) -> case eval(c, e) of [[s, w], Val(v)] -> [[s <- [x, Var(v)], w], Val(v)] esac
+  | Case(scrut, branches) ->
+      case eval(c, scrut) of [c, Val(scrut)] -> evalBranches(c, scrut, branches) esac
+  esac
 }
 
 
