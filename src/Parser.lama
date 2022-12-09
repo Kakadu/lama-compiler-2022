@@ -111,22 +111,22 @@ fun expandScope (defs, expr) {
   }
   
   case 
-    foldr (fun ([defs, expr], def) {
+    foldr (fun ([fdefs, vdefs, expr], def) {
              case def of
-               f@Fun (_, _, _) -> [f : defs, expr]
+               f@Fun (_, _, _) -> [f : fdefs, vdefs, expr]
              | Val (ds) ->
                  case expandValDefs (ds, expr) of
-                   [ds, expr] -> [Val (ds) : defs, expr]
+                   [ds, expr] -> [fdefs, ds +++ vdefs, expr]
                  esac
              | Var (ds) ->             
                  case expandVarDefs (ds, expr) of
-                   [ds, expr] -> [Var (ds) : defs, expr]
+                   [ds, expr] -> [fdefs, ds +++ vdefs, expr]
                  esac
              esac
            },
-           [{}, expr],
+           [{}, {}, expr],
            defs) of
-    [defs, expr] -> Scope (defs, expr)
+    [fdefs, vdefs, expr] -> Scope (Var(vdefs) : fdefs, expr)
   esac  
 }
 
@@ -182,6 +182,160 @@ fun reifyPatternBindings (matched, brs) {
   )
 }
 
+var ifp = memo $ eta syntax (
+      loc=pos kIf cond=exp kThen sTrue=scopeExpr kFi
+      {
+        fun (a) {
+          assertVoid(a,
+                     cond(Val) =>> fun(cond) {
+                     sTrue(Void) => fun(sTrue) {
+                       If(cond, sTrue, Skip)
+                     }}, loc)
+        }
+      }   |
+      kIf cond=exp kThen sTrue=scopeExpr kElse sFalse=exp kFi
+      {
+        fun (a) {
+          cond(Val) =>> fun(cond) {
+          sTrue(a) =>> fun(sTrue) {
+          sFalse(a) => fun(sFalse) {
+            If(cond, sTrue, sFalse)
+          }}}
+        }
+      } |
+      kIf cond=exp kThen sTrue=scopeExpr rest=elifsp
+      {
+        fun (a) {
+          cond(Val) =>> fun(cond){
+          sTrue(a) =>> fun(sTrue){
+          rest(a) => fun(rest){
+            If(cond, sTrue, rest)
+          }}}
+        }
+      }),
+    elifsp = memo $ eta syntax (
+      kElif cond=exp kThen sTrue=scopeExpr rest=elifsp
+      {
+        fun (a) {
+          cond(Val) =>> fun(cond) {
+          sTrue(a) =>> fun(sTrue) {
+          rest(a) => fun(rest) {
+            If(cond, sTrue, rest)
+          }}}
+        }
+      }   |
+      kElif cond=exp kThen sTrue=scopeExpr kElse sFalse=exp kFi
+      {
+        fun (a) {
+          cond(Val) =>> fun(cond) {
+          sTrue(a) =>> fun(sTrue) {
+          sFalse(a) => fun(sFalse) {
+            If(cond, sTrue, sFalse)
+          }}}
+        }
+      } |
+      loc=pos kElif cond=exp kThen sTrue=scopeExpr kFi
+      {
+        fun (a) {
+          assertVoid(a,
+                     cond(Val) =>> fun (cond) {
+                     sTrue(Void) => fun(sTrue) {
+                       If(cond, sTrue, Skip)
+                     }}, loc)
+        }
+      }),
+    whilep = memo $ eta syntax (
+      loc=pos kWhile cond=exp kDo body=scopeExpr kOd
+      {
+        fun (a) {
+          assertVoid(a,
+                     cond(Val) =>> fun(cond) {
+                     body(Void) => fun(body) {
+                       While(cond, body)
+                     }}, loc)
+        }
+      }),
+    dowhilep = memo $ eta syntax (
+      loc=pos kDo body=scopeExpr kWhile cond=scopeExpr kOd
+      {
+        fun (a) {
+          assertVoid(a,
+                     body(Void) =>> fun(body) {
+                     cond(Val) => fun(cond) {
+                       distributeScope(body, fun (body) {DoWhile(body, cond)})
+                     }}, loc)
+        }
+      }),
+    forp = memo $ eta syntax (
+      loc=pos kFor init=scopeExpr s[","] cond=exp s[","] iter=exp kDo body=scopeExpr kOd
+      {
+        fun (a) {
+          assertVoid(a,
+                     init(Void) =>> fun(init) {
+                     cond(Val) =>> fun(cond) {
+                     body(Void) =>> fun(body) {
+                     iter(Void) => fun(iter) {
+                       distributeScope(init, fun (init) {Seq(init, While(cond, Seq(body, iter)))})
+                     }}}}, loc)
+        }
+      }),
+    skipp = memo $ eta syntax (
+      loc=pos kSkip
+      {
+        fun (a) {
+           assertVoid(a, returnST $ Skip, loc)
+        }
+      }),
+    scopep = memo $ eta syntax (s=inbr[s("("), scopeExpr, s(")")]),
+    patternp = memo $ eta syntax (
+      -- decimal constant
+      x=decimal { Const (stringInt(x)) } |
+
+      -- array constant
+      x=inbr[s("["), list0(patternp), s("]")] { Array (x) } |
+
+      -- S-expression
+      x=uident args=inbr[s("("), list0(patternp), s(")")]?
+      {
+        case args of
+          None        -> Sexp (x, {})
+        | Some (args) -> Sexp (x, args)
+        esac
+      } |
+
+      -- binding
+      x=lident s["@"] p=patternp { Named(x, p) } |
+
+      -- wildcard
+      s["_"] { Wildcard } |
+
+      -- sugar
+      x=lident { Named(x, Wildcard) }
+    ),
+    branchp = memo $ eta syntax (
+      p=patternp s["->"] res=exp { [p, res] }
+    ),
+    casep = memo $ eta syntax (
+      loc=pos kCase scrut=exp kOf branches=listBy[branchp, s("|")] kEsac
+      {
+        fun (a) {
+          fun (state) {
+            case unzip(map(fun ([pat, res]) {[pat, res(a)]}, branches)) of [pats, ress] ->
+              case freshName(state) of [state, name] ->
+                (chainST(ress) =>> fun (ress) {
+                scrut(Val) => fun (scrut) {
+                  Scope({Var({name})},
+                        Seq(Ignor(Set(name, scrut)),
+                            Case(Var(name),
+                                 reifyPatternBindings(name, zip(pats, ress)))))
+                }}) $ state
+              esac
+            esac
+          }
+        }
+      }
+    );
+
 var
   primary = memo $ eta syntax (
     -- array constant
@@ -225,9 +379,7 @@ var
                         | Some (args) -> chainST (args) => fun (args) {Sexp (x, args)}
                         esac, loc)}
     } |
-  
-    $(failure ("the rest of primary parsing in not implemented\n"))),
-   
+    ifp | whilep | dowhilep | forp | skipp | scopep | casep),
 
   basic = memo $ eta (
     expr ({[Right, {[s (":="), fun (l, loc, r) {
