@@ -101,8 +101,171 @@ fun evalList (c, exprs) {
   esac
 }
 
-fun eval (c@[s, w], expr) {
-  failure ("evalExpr not implemented\n")
+fun unwrapVal (Val (x))
+  {x}
+
+fun listsEq (l1, l2) {
+  fun eq (l) {
+    case l of
+      {} -> true
+    | [a, b] : l ->
+        if matches (a, b)
+        then eq (l)
+        else false
+        fi
+    esac
+  }
+
+  if size (l1) != size (l2)
+  then false
+  else eq (zip (l1, l2))
+  fi
+}
+
+fun matches (scr, p) {
+  case p of
+    Wildcard -> true
+  | Named (_, p) -> matches (scr, p)
+  | Const (n) -> case scr of n -> true | _ -> false esac
+  | Array (arr) ->
+      case scr of
+        scr@#array -> listsEq (arrayList (scr), arr)
+      | _ -> false
+      esac
+  | Sexp (name, args) ->
+      case scr of
+        Sexp (scrName, scrArgs) ->
+          if compare (name, scrName) != 0
+          then false
+          else listsEq (arrayList (scrArgs), args)
+          fi
+      | _ -> false
+      esac
+  esac
+}
+
+fun matchingBranch (scr, brs) {
+  case brs of
+    {} -> error ("Match failure, scr = %s\n", scr.string)
+  | [p, br] : brs ->
+      if (matches (scr, p))
+      then br
+      else matchingBranch (scr, brs)
+      fi
+  esac
+}
+
+fun eval (c@[st, w], expr) {
+  case expr of
+    Assn (e1, e2) ->
+      case evalList (c, {e1, e2}) of
+        [[st, w], {Ref (key), Val (v)}] -> [[st <- [key, Var (v)], w], Val (v)]
+      | [c, {ARef (arr, idx), Val (v)}] -> arr[idx] := v; [c, Val (v)]
+      esac
+  | Seq (e1, e2) ->
+      case evalList (c, {e1, e2}) of [c, {_, x}] ->
+        [c, x]
+      esac
+  | Skip ->
+      [c, Void]
+  | If (e, s1, s2) ->
+      case eval (c, e) of [c, Val (v)] ->
+        eval (c, if v then s1 else s2 fi)
+      esac
+  | While (e, s) ->
+      case eval (c, e) of [c, Val (v)] ->
+        if v
+        then case eval (c, s) of [c, _] -> eval (c, While (e, s)) esac
+        else [c, Void]
+        fi
+      esac
+  | DoWhile (s, e) ->
+      case eval (c, s) of [c, _] ->
+        eval (c, While (e, s))
+      esac
+  | Var (x) ->
+      case lookup (st, x) of Var (v) ->
+        [c, Val (v)]
+      esac
+  | Ref (x) ->
+      [c, Ref (x)]
+  | Const (n) ->
+      [c, Val (n)]
+  | Binop (op, e1, e2) ->
+      case evalList (c, {e1, e2}) of [c, {Val (v1), Val (v2)}] ->
+        [c, Val (evalOp (op, v1, v2))]
+      esac
+  | Ignore (e) ->
+      case eval (c, e) of [c, _] ->
+        [c, Void]
+      esac
+  | Scope (ds, e) ->
+      var newState = foldl (fun (st, d) {
+                              case d of
+                                Var (names) -> addNames (st, names)
+                              | Val (names) -> addNames (st, names)
+                              | Fun (name, args, body) -> addFunction (st, name, args, body)
+                              esac
+                            },
+                            enterScope (st),
+                            ds);
+
+      case eval ([newState, w], e) of [[st, w], ret] ->
+        [[leaveScope (st), w], ret]
+      esac
+  | Call (f, exprs) ->
+      case lookup (st, f) of
+        Fun (_, External) -> eval (c, Builtin (f, exprs))
+      | Fun (argNames, body) ->
+          case evalList (c, exprs) of [c, argVals] ->
+            var newState = foldl (fun (st, [argName, argVal]) {
+                                    case argVal of Val (v) ->
+                                      addName (st, argName, Var (v))
+                                    esac
+                                  },
+                                  enterFunction (st),
+                                  zip (argNames, argVals));
+
+            case eval ([newState, w], body) of [[newState, w], ret] ->
+              [[leaveFunction (st, getGlobal (newState)), w], ret]
+            esac
+          esac
+      esac
+    | Builtin (name, exprs) ->
+        case evalList(c, exprs) of [[st, w], vals] ->
+          var args = map (unwrapVal, vals);
+          case evalBuiltin (name, args, w) of [v, w] ->
+            [[st, w], Val (v)]
+          esac
+        esac
+    | Set (s, e) ->
+        eval (c, Assn (Ref (s), e))
+    | String (s) ->
+        [c, Val (s)]
+    | Array (exprs) ->
+        case evalList (c, exprs) of [c, vals] ->
+          var arr = listArray(map (unwrapVal, vals));
+          [c, Val (arr)]
+        esac
+    | Sexp (name, exprs) ->
+        case eval (c, Array (exprs)) of [c, Val (arr)] ->
+          [c, Val (Sexp (name, arr))]
+        esac
+    | Elem (e, idx) ->
+        case evalList (c, {e, idx}) of
+          [c, {Val (Sexp (_, arr)), Val (idx)}] -> [c, Val (arr[idx])]
+        | [c, {Val (arr), Val (idx)}] -> [c, Val (arr[idx])]
+        esac
+    | ElemRef (e, idx) ->
+        case evalList (c, {e, idx}) of
+          [c, {Val (Sexp (_, arr)), Val (idx)}] -> [c, ARef (arr, idx)]
+        | [c, {Val (arr), Val (idx)}] -> [c, ARef (arr, idx)]
+        esac
+    | Case (scr, brs) ->
+        case eval (c, scr) of [c, Val (scr)] ->
+          eval (c, matchingBranch (scr, brs))
+        esac
+  esac
 }
 
 
