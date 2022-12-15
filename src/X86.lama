@@ -494,6 +494,97 @@ fun toFixedNum (r) {
   singletonBuffer (Sal1 (r)) <+ Or1 (r)
 }
 
+fun getOpType (op) {
+  case op of
+    "+"  -> General
+  | "-"  -> General
+  | "*"  -> General
+  | "&&" -> Logical
+  | "!!" -> Logical
+  | "/"  -> Division
+  | "%"  -> Division
+  | _    -> Comparison
+  esac
+}
+
+fun genGeneral (op, l, r) {
+  case op of
+    "+" -> singletonBuffer (Mov (l, eax)) <+ Binop (op, r, eax) <+ Dec (eax) <+ Mov (eax, l)
+  | "-" -> singletonBuffer (Mov (l, eax)) <+ Binop (op, r, eax) <+ Or1 (eax) <+ Mov (eax, l)
+  | "*" -> singletonBuffer (Mov (l, eax)) <+ Dec (eax) <+ Sar1 (r) <+ Binop (op, r, eax) <+ Or1 (eax) <+ Mov (eax, l)
+  esac
+}
+
+fun genLogical (op, l, r) {
+  singletonBuffer (Mov (l, eax)) <+ Sar1 (eax) <+ Mov (L (0), edx) <+ Binop ("cmp", eax, edx) <+
+  Mov (L (0), eax) <+ Set ("ne", "%al") <+ Push (eax) <+ Mov (r, eax) <+ Sar1 (eax) <+
+  Binop ("cmp", eax, edx) <+ Mov (L (0), eax) <+ Set ("ne", "%al") <+ Pop (edx) <+
+  Binop (op, edx, eax) <+> toFixedNum (eax) <+ Mov (eax, l)
+}
+
+fun genDivision (op, l, r) {
+  singletonBuffer (Mov (l, eax)) <+ Sar1 (eax) <+ Sar1 (r) <+ Cltd <+ IDiv (r) <+>
+  case op of
+    "/" -> toFixedNum (eax) <+ Mov (eax, l)
+  | "%" -> toFixedNum (edx) <+ Mov (edx, l)
+  esac
+}
+
+fun genComparison (op, l, r) {
+  singletonBuffer (Mov (l, eax)) <+ Mov (r, edx) <+ Binop ("cmp", edx, eax) <+
+  Mov (L (0), eax) <+ Set (suffix(op), "%al") <+> toFixedNum (eax) <+ Mov (eax, l)
+}
+
+fun genBinOp (op, l, r) {
+  case getOpType (op) of
+    General    -> genGeneral (op, l, r)
+  | Logical    -> genLogical (op, l, r)
+  | Division   -> genDivision (op, l, r)
+  | Comparison -> genComparison (op, l, r)
+  esac
+}
+
+fun genCall (env, fLabel, na) {
+  var pushRegs = map (fun (r) {Push (r)}, liveRegisters (env, na));
+  var popRegs = map (fun (r) {Pop (r)}, liveRegisters (env, na));
+  var pushArgs = {};
+
+  popRegs := reverse (popRegs);
+
+  for var i; i := 0, i < na, i := i + 1 do
+    case pop (env) of [x, newEnv] ->
+      pushArgs := pushArgs +++ {Push (x)};
+      env := newEnv
+    esac
+  od;
+
+  case allocate (env) of [x, env] ->
+    [env, listBuffer (pushRegs) <+> listBuffer (pushArgs) <+ Call (fLabel) <+
+          Binop ("+", L (wordSize * na), esp) <+> listBuffer (popRegs) <+ Mov (eax, x)]
+  esac
+}
+
+fun genArrayOrSexp (env, na, builtinStr) {
+  var pushRegs = map (fun (r) {Push (r)}, liveRegisters (env, na));
+  var popRegs = map (fun (r) {Pop (r)}, liveRegisters (env, na));
+  var pushArgs = {};
+
+  popRegs := reverse (popRegs);
+
+  for var i; i := 0, i < na, i := i + 1 do
+    case pop (env) of [x, newEnv] ->
+      pushArgs := pushArgs +++ {Push (x)};
+      env := newEnv
+    esac
+  od;
+
+  pushArgs := pushArgs +++ {Mov (L (makeBox (na)), eax), Push (eax)};
+
+  case allocate (env) of [x, env] ->
+    [env, listBuffer (pushRegs) <+> listBuffer (pushArgs) <+ Call (builtinStr) <+
+          Binop ("+", L (wordSize * (na + 1)), esp) <+> listBuffer (popRegs) <+ Mov (eax, x)]
+  esac
+}
 
 -- Compiles stack machine code into a list of x86 instructions. Takes an environment
 -- and stack machine code, returns an updated environment and x86 code.
@@ -543,7 +634,113 @@ fun compile (args, env, code) {
            -- 1. generate proper prologue for BEGIN instruction (use "prologue" helper); use
            --    env.enterFunction to create a proper environment;
            -- 2. generate epilogue for END instruction.
-               
+
+          | CONST (n) ->
+            case allocate (env) of
+              [s, env] -> [env, code <+> move (L (makeBox (n)), s)]
+            esac
+          | LD (x) ->
+              case allocate (env) of
+                [s, env] -> [env, code <+> move (loc (env, x), s)]
+              esac
+          | ST (x) ->
+              [env, code <+> move (peek (env), loc (env, x))]
+          | BINOP (op) ->
+              case pop2 (env) of
+                [r, l, env] -> [push(env, l), code <+> genBinOp(op, l, r)]
+              esac
+          | LABEL (l, _) ->
+            if isBarrier (env)
+            then env := retrieveStack (env, l)
+            fi;
+
+            [env, code <+ Label (l)]
+          | JMP (l) ->
+            case setBarrier (setStack (env, l)) of
+              env -> [env, code <+ Jmp (l)]
+            esac
+          | CJMP (c, l) ->
+            case pop (env) of
+              [s, env] -> [setStack (env, l), code <+ Mov (L (makeBox (0)), eax) <+ Binop ("cmp", eax, s) <+
+                           CJmp (c, l)]
+            esac
+          | LDA (x) ->
+              case allocate (env) of [s1, env] ->
+                case allocate (env) of [s2, env] ->
+                 [env, code <+ Lea (loc (env, x), eax) <+ Mov (eax, s1) <+ Mov (eax, s2)]
+                esac
+              esac
+          | STI ->
+              case pop2 (env) of
+                [v, x, env] -> [push (env, x), code <+ Mov (v, I (0, x)) <+ Mov (v, x)]
+              esac
+          | DROP ->
+              case pop (env) of
+                [_, env] -> [env, code]
+              esac
+          | DUP ->
+              var v = peek (env);
+
+              case allocate (env) of [s, env] ->
+                [env, code <+> move (v, s)]
+              esac
+          | BEGIN (fLabel, na, nl) ->
+              [enterFunction(env, fLabel, nl), code <+> prologue (fLabel)]
+          | END ->
+              case epilogue (env) of [env, eCode] ->
+                [env, code <+> eCode]
+              esac
+          | CALL (fLabel, na) ->
+              case genCall (env, fLabel, na) of [env, callCode] ->
+                [env, code <+> callCode]
+              esac
+          | GLOBAL (g) ->
+              [addGlobal (env, g), code]
+          | STRING (s) ->
+              case addString (env, s) of [env, s] ->
+                case allocate (env) of [x, env] ->
+                  case genCall (env, "Bstring", 1) of [env, callCode] ->
+                    [env, code <+ Lea (M (s), eax) <+ Mov (eax, x) <+> callCode]
+                  esac
+                esac
+              esac
+          | ARRAY (n) ->
+              case genArrayOrSexp (env, n, "Barray") of [env, callCode] ->
+                [env, code <+> callCode]
+              esac
+          | SEXP (tag, n) ->
+              case allocate (env) of [s, env] ->
+                case genArrayOrSexp (env, n + 1, "Bsexp") of [env, callCode] ->
+                  [env, code <+> move (L (makeBox (tagHash (tag))), s) <+> callCode]
+                esac
+              esac
+          | STA ->
+              case genCall (env, "Bsta", 3) of [env, callCode] ->
+                [env, code <+> callCode]
+              esac
+          | ELEM ->
+              case genCall (env, "Belem", 2) of [env, callCode] ->
+                [env, code <+> callCode]
+              esac
+          | BUILTIN (name, na) ->
+              case genCall (env, "L" ++ name, na) of [env, callCode] ->
+                [env, code <+> callCode]
+              esac
+          | TAG (tag, n) ->
+              case allocate (env) of [s1, env] ->
+                case allocate (env) of [s2, env] ->
+                  case genCall (env, "Btag", 3) of [env, callCode] ->
+                    [env, code <+> move (L (makeBox (tagHash (tag))), s1) <+>
+                          move (L (makeBox (n)), s2) <+> callCode]
+                  esac
+                esac
+              esac
+          | PATT (n) ->
+              case allocate (env) of [s, env] ->
+                case genCall (env, "Barray_patt", 2) of [env, callCode] ->
+                  [env, code <+> move (L (makeBox (n)), s) <+> callCode]
+                esac
+              esac
           | _ -> failure ("codegeneration for instruction %s is not yet implemented\n", i.string)
           esac
         fi
