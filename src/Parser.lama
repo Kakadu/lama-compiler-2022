@@ -229,6 +229,32 @@ var
     $(failure ("the rest of primary parsing in not implemented\n"))),
    
 
+                                        e=inbr[s ("("), scopeExpr, s (")")]                   { e }
+                                      | loc=pos kSkip                                   { fun (a) { assertVoid (a, Skip, loc) } } 
+                                      | loc=pos kIf el=elseItem                               { fun (a) { el (a) } }
+                                      | loc=pos kWhile cond=exp kDo body=scopeExpr kOd        { fun (a) { assertVoid (a, While (cond (Val), body (Void)), loc) } }
+                                      | loc=pos kDo body=scopeExpr kWhile cond=scopeExpr kOd  { fun (a) {
+                                                                                                distributeScope (
+                                                                                                  body (Void),
+                                                                                                  fun (body) {  
+                                                                                                    assertVoid (a, DoWhile (body, cond (Val)), loc) 
+                                                                                                  } 
+                                                                                                )}
+                                                                                              }
+                                      | loc=pos kFor decl=scopeExpr s[","] cond=exp s[","] succ=exp kDo body=scopeExpr kOd
+                                                                                              { fun (a) {
+                                                                                                distributeScope (
+                                                                                                  decl (Void),
+                                                                                                  fun (decl) {
+                                                                                                    assertVoid (a, 
+                                                                                                                Seq (decl, 
+                                                                                                                      While (cond (Val), 
+                                                                                                                        Seq (body (Void), succ (Void)))), 
+                                                                                                                loc)
+                                                                                                  }
+                                                                                                )} 
+                                                                                              }
+                                    ),
   basic = memo $ eta (
     expr ({[Right, {[s (":="), fun (l, loc, r) {
                                  fun (a) {assertValue (a, l (Ref) =>> fun (l) {
@@ -316,6 +342,17 @@ var
      }
    }
   );
+
+var elseItem = memo $ eta syntax (
+  cond=exp kThen body=scopeExpr
+  end = (
+      kElif el=elseItem { fun (a) { If (cond (Val), body (a), el (a)) } }
+    | kElse el=scopeExpr kFi  { fun (a) { If (cond (Val), body (a), el (a)) } }
+    | kFi               { fun (a) { assertVoid (a, If (cond (Val), body (Void), Skip), loc) } }
+  )
+
+  { end }
+);
 
 -- Public top-level parser
 public parse = syntax (s=scopeExpr {s (Void) (emptyEnv ()) [1]});
