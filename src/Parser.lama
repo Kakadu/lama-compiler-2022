@@ -225,8 +225,71 @@ var
                         | Some (args) -> chainST (args) => fun (args) {Sexp (x, args)}
                         esac, loc)}
     } |
-  
-    $(failure ("the rest of primary parsing in not implemented\n"))),
+
+    loc=pos kSkip { fun(a) { assertVoid (a, returnST $ Skip, loc) } } |
+    loc=pos kIf cond=exp kThen s1=scopeExpr s2=elseTail {
+        fun(a) {
+            cond (Val) =>> fun (cond) {
+                s1 (a) =>> fun (s1) {
+                    s2 (a) => fun (s2) {
+                        If (cond, s1, s2)
+                    }
+                }
+            }
+        }
+    } |
+    loc=pos kWhile cond=exp kDo body=scopeExpr kOd {
+        fun(a) {
+            assertVoid (a, cond (Val) =>> fun (cond) {
+                body (Void) => fun (body) {
+                    While (cond, body)
+                }
+            }, loc)
+        }
+    } |
+    loc=pos kDo body=scopeExpr kWhile cond=exp kOd {
+        fun(a) {
+            assertVoid (a, body (Void) =>> fun (body) {
+                cond (Val) => fun (cond) {
+                    distributeScope(body, fun (body) {
+                        DoWhile (body, cond)
+                    })
+                }
+            }, loc)
+        }
+    } |
+    loc=pos kFor s1=scopeExpr s[","] cond=exp s[","] s2=exp kDo s3=scopeExpr kOd {
+        fun(a) {
+            assertVoid(a, s1 (Void) =>> fun (s1) {
+                s2 (Void) =>> fun (s2) {
+                    s3 (Void) =>> fun (s3) {
+                        cond (Val) => fun (cond) {
+                            distributeScope(s1, fun (s1) { Seq (s1, While (cond, Seq (s3, s2))) })
+                        }
+                    }
+                }
+            }, loc)
+        }
+    } |
+    loc=pos kCase scrutinee=exp kOf branches=listBy[
+        syntax (p=pattern s["->"] e=scopeExpr { fun (a) { e (a) => fun (e) { [p, e] } } }),
+        s("|")
+    ] kEsac {
+        fun (a) {
+            scrutinee (Val) =>> fun (scrutinee) {
+                chainST (map(fun (branch) { branch (a) }, branches)) =>> fun (branches) {
+                    freshName => fun (scrutineeName) {
+                        Scope (
+                            { Val ({ scrutineeName }) },
+                            Seq (Ignore (Set (scrutineeName, scrutinee)), Case (scrutineeName, reifyPatternBindings (scrutineeName, branches), loc) ) -- FIXME maybe i should save position of case expression...
+                        )
+                    }
+                }
+            }
+        }
+    } |
+    -s["("] scopeExpr -s[")"]
+  ),
    
 
   basic = memo $ eta (
@@ -315,6 +378,33 @@ var
        }}
      }
    }
+  ),
+
+  elseTail = memo $ eta syntax ( kFi { fun(a) { assertVoid (a, returnST $ Skip, loc) } } | -kElse scopeExpr -kFi |
+    kElif cond=exp kThen s1=scopeExpr s2=elseTail {
+        fun(a) {
+            cond (Val) =>> fun (cond) {
+                s1 (a) =>> fun (s1) {
+                    s2 (a) => fun (s2) {
+                        If (cond, s1, s2)
+                    }
+                }
+            }
+        }
+    }
+  ),
+
+  pattern = memo $ eta syntax (
+    x=decimal { Const (stringInt(x)) }                                       |
+    s["_"]    { Wildcard }                                                   |
+    ps=inbr[s("["), list0(pattern), s("]")] {
+        case ps of None -> Array ({}) | Some (ps) -> Array (ps) esac
+    }                                                                        |
+    name=uident ps=inbr[s("("), list0(pattern), s(")")]? {
+        case ps of None -> Sexp (name, {}) | Some (ps) -> Sexp (name, ps) esac
+    }                                                                        |
+    name=lident s["@"] p=pattern { Named (name, p) }                         |
+    name=lident { Named (name, Wildcard) }
   );
 
 -- Public top-level parser
