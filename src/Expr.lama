@@ -128,7 +128,7 @@ fun eval (c@[s, w], expr) {
   | Case (scrutinee, branches, loc) -> (
     case lookupVal(s, scrutinee) of
         Val (value) -> case branches of
-          [pat, expr] : branches -> if match (pat, value) then eval (c, expr) else eval (c, Case (scrutinee, branches), loc) fi
+          [pat, expr] : branches -> if match (pat, value) then eval (c, expr) else eval (c, Case (scrutinee, branches, loc)) fi
         | _ -> error ("match failure", loc)
         esac
     esac
