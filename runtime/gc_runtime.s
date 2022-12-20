@@ -20,7 +20,8 @@ __gc_stack_top:	        .long	0
 
 // ==================================================
 // Initialize @__gc_stack_bottom and call @init_pool
-L__gc_init:		movl	%esp, __gc_stack_bottom
+L__gc_init:
+            movl	%esp, __gc_stack_bottom
 			addl	$4, __gc_stack_bottom
 			call	init_pool
 			ret

@@ -262,6 +262,20 @@ extern int Bstring_patt (void *x, void *y) {
   }
 }
 
+extern int Bsexp_patt (void *x, int hash, int size) {
+  if (UNBOXED(x)) return BOX(0);
+  else {
+    data *datax = TO_DATA(x);
+
+    if (TAG(datax->tag) != SEXP_TAG) return BOX(0);
+
+    sexp *sexpx = TO_SEXP(x);
+    if(*((int*) sexpx) != UNBOX(hash)) return BOX(0);
+
+    return BOX(LEN(datax->tag) == UNBOX(size) ? 1 : 0);
+  }
+}
+
 void Lwrite (int x) {
   printf ("%d\n", UNBOX (x));
 }
