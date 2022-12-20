@@ -37,7 +37,7 @@ public fun showSMInsn (i) {
   | STI              -> "STI"
   | SEXP   (s, n)    -> sprintf ("SEXP ""%s"", %d", s, n)
   | CONST  (n)       -> sprintf ("CONST %d", n)
-  | LABEL  (s, f)    -> sprintf ("LABEL %s, %d", s, f)
+  | LABEL  (s)       -> sprintf ("LABEL %s", s)
   | JMP    (l)       -> sprintf ("JMP %s", l)
   | CJMP   (c, l)    -> sprintf ("CJMP %s, %s", c, l)
   | CALL   (f, n)    -> sprintf ("CALL %s, %d", f, n)
@@ -67,7 +67,7 @@ fun initEvalEnv (insns) {
           fun ([m, insns]) {
             case insns of
               {}                  -> m
-            | LABEL (lab, _) : tl -> rec ([addMap (m, lab, insns), tl])
+            | LABEL (lab) : tl    -> rec ([addMap (m, lab, insns), tl])
             | _ : tl              -> rec ([m, tl])
             esac
           }
@@ -80,6 +80,7 @@ fun initEvalEnv (insns) {
 
 -- Accessor function
 fun fromLabel (env, lab) {
+  -- printf("label %s\n", lab);
   env [0] (lab)
 }
 
@@ -154,6 +155,15 @@ fun eval (env, w, insns) {
         | CONST (n)  -> [n : stack, cst, st, w]
         | DROP       -> [stack.tl, cst, st, w]
         | DUP        -> [stack.hd : stack, cst, st, w]
+        | PATT (pat) -> (
+            var value = stack.hd, stackTail = stack.tl;
+
+            case [pat, value] of
+              [Array (s), x@#array]              -> [(x.length == s) : stackTail, cst, st, w]
+            | [Sexp (name, s), Sexp (x, values)] -> [(values.length == s && compare (name, x) == 0) : stackTail, cst, st, w]
+            | _                                  -> [0 : stackTail, cst, st, w]
+            esac
+        ) -- FIXME add meta instruction evaluation
         | STRING (s) -> [s : stack, cst, st, w]
         | ARRAY (n)  -> (
             case take (stack, n) of
@@ -230,6 +240,7 @@ fun eval (env, w, insns) {
 
 -- Runs a stack machine for a given input and a given program, returns an output
 public fun evalSM (input, insns) {
+  -- printf("=== program\n%s\n", showSM (insns));
   eval (initEvalEnv (insns), createWorld (input), insns)
 }
 
@@ -667,7 +678,7 @@ public fun compileSM (stmt) {
             esac
         esac
     )
-    | ElemRef (arrayExpr, indexExpr) -> ( -- FIXME maybe i should delete duplicate code...
+    | ElemRef (arrayExpr, indexExpr) -> (
         case genLabels(env, 2) of
             [arrayLabel, indexLabel, env] -> case compile (arrayLabel, env, arrayExpr) of
                 [arrayLabelUsed, env, arrayCode] -> case compile (indexLabel, env, indexExpr) of
@@ -682,6 +693,75 @@ public fun compileSM (stmt) {
         case genLabel(env) of
             [argsLabel, env] -> case compile (argsLabel, env, foldl(fun (a, arg) { Seq (a, arg) }, Skip, args)) of
                 [argsLabelUsed, env, argsCode] -> [false, env, argsCode <+> label (argsLabel, argsLabelUsed) <+ SEXP (name, size (args))]
+            esac
+        esac
+    )
+    | Case (scrutinee, branches, loc) -> (
+
+        fun max(a, b) {
+            if a > b then a else b fi
+        }
+
+        fun genDropLab(drop0Lab, depth) {
+            sprintf("%s_drop_%d", drop0Lab, depth)
+        }
+
+        fun compilePattern(pat, drop0Lab, depth) {
+
+            fun arrayHelper(ps, depth) {
+                foldl(fun ([code, index], pat) {
+                    [code <+> listBuffer({ DUP, CONST (index), ELEM }) <+> compilePattern(pat, drop0Lab, depth + 1), index + 1]
+                }, [emptyBuffer(), 0], ps)[0]
+            }
+
+            case pat of
+              Wildcard                            -> emptyBuffer()
+            | Const (n)                           -> listBuffer({ DUP, CONST (n), BINOP ("=="), CJMP("z", genDropLab(drop0Lab, depth))})
+            | Array (ps)                          -> listBuffer({ DUP, PATT (Array (size (ps))), CJMP("z", genDropLab(drop0Lab, depth))}) <+> arrayHelper(ps, depth)
+            | Sexp (name, ps)                     -> listBuffer({ DUP, PATT (Sexp (name, size(ps))), CJMP("z", genDropLab(drop0Lab, depth))}) <+> arrayHelper(ps, depth)
+            | Named (_, p)                        -> compilePattern(p, drop0Lab, depth)
+            esac
+        }
+
+        fun patternDepth(pat) {
+            fun helper(pat, depth) {
+                case pat of
+                  Wildcard                            -> depth
+                | Const (n)                           -> depth
+                | Array (ps)                          -> foldl(fun (acc, pat) { max (acc, patternDepth (pat)) }, 0, ps) + depth + 1
+                | Sexp (_, ps)                        -> foldl(fun (acc, pat) { max (acc, patternDepth (pat)) }, 0, ps) + depth + 1
+                | Named (_, p)                        -> patternDepth (p)
+                esac
+            }
+
+            helper(pat, 0)
+        }
+
+        fun genDrops(drop0Lab, branches) {
+            fun helper (code, depth) {
+                if depth > 0 then helper (code <+ LABEL (genDropLab (drop0Lab, depth)) <+ DROP, depth - 1) else code fi
+            }
+
+            var maxDepth = foldl(fun (acc, [pat, expr]) { max (acc, patternDepth (pat)) }, 0, branches);
+
+            helper(emptyBuffer (), maxDepth)
+        }
+
+        fun compileBranches() {
+            case genLabel(env) of
+                [drop0Lab, env] -> foldl(fun ([drop0Lab, env, emittedCode], [pat, expr]) {
+                    case compilePattern(pat, drop0Lab, 0) of
+                        patternCode -> case compile (lab, env, expr) of
+                            [_, env, branchCode] -> [drop0Lab, env, patternCode <+ DROP <+> branchCode <+> JMP (lab)]
+                        esac
+                    esac
+                }, [drop0Lab, env, emptyBuffer()], branches)
+            esac
+        }
+
+        case compile (lab, env, Var (scrutinee)) of
+            [_, env, loadScrutineeCode] -> case compileBranches () of
+                [drop0Lab, env, branchesCode] -> [true, env, loadScrutineeCode <+> branchesCode <+> genDrops (drop0Lab, branches) <+ META (MF (loc)) ]
             esac
         esac
     )
