@@ -733,7 +733,7 @@ public fun compileSM (stmt) {
             }
 
             case pat of
-              Wildcard                            -> emptyBuffer ()
+              Wildcard                            -> listBuffer({ CONST (1), CJMP("z", genDropLab(drop0Lab, depth))}) -- FIXME hack. bug in X86 with symbolic stack, drop0Lab with this depth must have saved symbolic stack state
             | Const (n)                           -> listBuffer({ DUP, CONST (n), BINOP ("=="), CJMP("z", genDropLab(drop0Lab, depth))})
             | Array (ps)                          -> listBuffer({ DUP, PATT (Array (size (ps))), CJMP("z", genDropLab(drop0Lab, depth))}) <+> arrayHelper(ps, depth)
             | Sexp (name, ps)                     -> listBuffer({ DUP, PATT (Sexp (name, size(ps))), CJMP("z", genDropLab(drop0Lab, depth))}) <+> arrayHelper(ps, depth)
