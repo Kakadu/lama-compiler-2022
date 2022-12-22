@@ -8,13 +8,13 @@ import Manifest;
 import Buffer;
 
 -- Assembler language interface
--- The registers: 
+-- The registers:
 var regs = ["%ebx", "%ecx", "%esi", "%edi", "%eax", "%edx", "%ebp", "%esp"];
 
 -- We can not freely operate with all register; only with 4 by now
 var nRegs = regs.length - 5;
 
--- For convenience we define the following synonyms for the registers: 
+-- For convenience we define the following synonyms for the registers:
 var ebx = R (0),
     ecx = R (1),
     esi = R (2),
@@ -27,21 +27,21 @@ var ebx = R (0),
 -- We need to know the word size to calculate offsets correctly
 var wordSize = 4;
 
--- We need to distinguish the following operand types: 
---    R (int)       -- hard register                    
---    S (int)       -- a position on the hardware stack 
---    M (string)    -- a named memory location          
+-- We need to distinguish the following operand types:
+--    R (int)       -- hard register
+--    S (int)       -- a position on the hardware stack
+--    M (string)    -- a named memory location
 --    L (int)       -- an immediate operand
 --    I (int, opnd) -- an indirect operand with offset
 
 -- Some x86 instruction (we do not need all of them):
---   Mov   (opnd, opnd)         -- copies a value from the first to the second operand  
+--   Mov   (opnd, opnd)         -- copies a value from the first to the second operand
 --   Lea   (opnd, opnd)         -- loads an address of the first operand into the second
---   Binop (string, opnd, opnd) -- makes a binary operation; note, the first operand   
+--   Binop (string, opnd, opnd) -- makes a binary operation; note, the first operand
 --                                 designates x86 operator, not the source language one
---   IDiv  (opnd)               -- x86 integer division, see instruction set reference 
---   Cltd                       -- see instruction set reference           
---   Set   (string, string)     -- sets a value from flags; the first operand is the   
+--   IDiv  (opnd)               -- x86 integer division, see instruction set reference
+--   Cltd                       -- see instruction set reference
+--   Set   (string, string)     -- sets a value from flags; the first operand is the
 --                                 suffix, which determines the value being set, the
 --                                 the second --- (sub)register name
 --   Jmp   (string)             -- unconditional jump to a label
@@ -49,20 +49,20 @@ var wordSize = 4;
 --   Label (string)             -- a label
 --   Push  (opnd)               -- pushes the operand on the hardware stack
 --   Pop   (opnd)               -- pops from the hardware stack to the operand
---   Call  (string)             -- calls a function by its name 
+--   Call  (string)             -- calls a function by its name
 --   Ret                        -- returns from a function
 --   Meta  (string)             -- metainformation (declarations, etc.)
-                                                               
+
 -- Machine instruction printer
 fun insnString (insn) {
-  
+
   fun binopString (op) {
     case op of
       "+"   -> "addl"
     | "-"   -> "subl"
     | "*"   -> "imull"
     | "&&"  -> "andl"
-    | "!!"  -> "orl" 
+    | "!!"  -> "orl"
     | "^"   -> "xorl"
     | "cmp" -> "cmpl"
     esac
@@ -119,12 +119,12 @@ fun makeEnv (stack, stackSlots, globals, barrier, stackMap, fLabel, nLocals) {
   fun envString () {
     sprintf ("Stack     : %s\nStackSlots: %d\nGlobals   : %s\n", stack.string, stackSlots, elements (globals).string)
   }
-  
+
   -- Allocates a new position on the symbolic stack;
   -- returns a pair: a location for allocated item and
   -- an updated environment
   fun allocate () {
-    case 
+    case
       case stack of
         {}        -> [ebx, 0]
       | S (n) : _ -> [S (n+1), n+2]
@@ -159,7 +159,7 @@ fun makeEnv (stack, stackSlots, globals, barrier, stackMap, fLabel, nLocals) {
   fun peek () {
     stack.fst
   }
-  
+
   -- Adds a global variable; returns an updated environment
   fun addGlobal (name) {
     makeEnv (stack, stackSlots, addSet (globals, globalName (name)), barrier, stackMap, fLabel, nLocals)
@@ -173,7 +173,7 @@ fun makeEnv (stack, stackSlots, globals, barrier, stackMap, fLabel, nLocals) {
     | Loc (i) -> S (i)
     esac
   }
-  
+
   -- Gets a list of global variables from the environment
   fun getGlobals () {
     globals.elements
@@ -353,7 +353,7 @@ fun dataDef (name) {
 fun prologue (fLabel) {
   singletonBuffer (Push  (ebp)) <+
   Mov   (esp, ebp) <+
-  Binop ("-", M (sprintf ("$%s_SIZE", fLabel)), esp)  
+  Binop ("-", M (sprintf ("$%s_SIZE", fLabel)), esp)
 }
 
 -- Generates function epilogue
@@ -373,7 +373,7 @@ fun stackOpnd (opnd) {
   case opnd of
     S (_) -> true
   | _     -> false
-  esac      
+  esac
 }
 
 -- Checks if an operand resides in memory
@@ -410,44 +410,128 @@ fun suffix (op) {
 -- Compiles stack machine code into a list of x86 instructions. Takes an environment
 -- and stack machine code, returns an updated environment and x86 code.
 fun compile (env, code) {
-  fun compile (env, code) {
-    foldl (
-      fun ([env, scode], i) {
-        var code = scode <+ Meta ("# " ++ showSMInsn (i) ++ "\n");
-        case i of
-          READ ->
-            case env.allocate of
-	      [s, env] -> [env, code <+ Push (edx) <+ Push (ecx) <+ Call ("Lread") <+ Pop (ecx) <+ Pop (edx) <+ Mov (eax, s)]
-            esac             
-        | WRITE ->
-            case env.pop of
-	      [s, env] -> [env, code <+ Push (edx) <+ Push (ecx) <+ Push (s) <+ Call ("Lwrite") <+ Pop (eax) <+ Pop (ecx) <+ Pop (edx)]
+  foldl (
+    fun ([env, scode], i) {
+      var code = scode <+ Meta ("# " ++ showSMInsn (i) ++ "\n");
+      case i of
+        READ ->
+          case env.allocate of
+            [s, env] -> [env, code <+ Push (edx) <+ Push (ecx) <+ Call ("Lread") <+ Pop (ecx) <+ Pop (edx) <+ Mov (eax, s)]
+          esac
+      | WRITE ->
+          case env.pop of
+            [s, env] -> [env, code <+ Push (edx) <+ Push (ecx) <+ Push (s) <+ Call ("Lwrite") <+ Pop (eax) <+ Pop (ecx) <+ Pop (edx)]
+          esac
+      (* Assignment *)
+        -- Some guidelines for generating function calls:
+        --
+        -- 1. generate instructions to save live registers on the X86 stack (use
+        --    env.liveRegisters (number of arguments);
+        -- 2. generate instructions to move actual parameters from the symbolic
+        --    stack to the hardware one;
+        -- 3. generate the call itself;
+        -- 4. discard the actual parameters from the stack;
+        -- 5. restore saved live registers.
+        --
+        -- Some guidelines for generating functions:
+        --
+        -- 1. generate proper prologue for BEGIN instruction (use "prologue" helper); use
+        --    env.enterFunction to create a proper environment;
+        -- 2. generate epilogue for END instruction.
+      | CONST (n) ->
+          case env.allocate of
+            [s, env] -> [env, code <+ Mov (L(n), s)]
+          esac
+      | LD    (x) ->
+          case env.allocate of
+            [s, env] -> case env.addGlobal (x) of
+                env -> [env, code <+> move (env.loc(x), s)]
             esac
-        (* Assignment *)
-        
-         -- Some guidelines for generating function calls:
-         --
-         -- 1. generate instructions to save live registers on the X86 stack (use
-         --    env.liveRegisters (number of arguments);
-         -- 2. generate instructions to move actual parameters from the symbolic
-         --    stack to the hardware one;
-         -- 3. generate the call itself;
-         -- 4. discard the actual parameters from the stack;
-         -- 5. restore saved live registers.
-         --
-         -- Some guidelines for generating functions:
-         --
-         -- 1. generate proper prologue for BEGIN instruction (use "prologue" helper); use
-         --    env.enterFunction to create a proper environment;
-         -- 2. generate epilogue for END instruction.
-               
-        | _ -> failure ("codegeneration for instruction %s is not yet implemented\n", i.string)
-        (* End *)
-        esac
-      }, [env, emptyBuffer ()], code)
+          esac
+      | ST (x) ->
+          case env.pop of
+            [s, env] -> case env.addGlobal (x) of
+                env -> [env, code <+> move (s, env.loc (x))]
+            esac
+          esac
+      | BINOP (op) -> compileBinop(env, code, op)
+      | JMP (s) ->
+          [env, code <+ Jmp (s)]
+      | LABEL (l) ->
+          [env, code <+ Label (l)]
+      | CJMP (c, l) ->
+            case env.pop of
+              [s, env] ->
+                [env, code <+> toBool(s) <+ CJmp(c, l)]
+            esac
+      | _ -> failure ("codegeneration for instruction %s is not yet implemented\n", i.string)
+      esac
+    }, [env, emptyBuffer ()], code)
+}
+
+fun cmp(a, b, op, res) {
+    var base = if stackOpnd(a) && stackOpnd(b) then
+      move(a, eax) <+ Binop ("cmp", eax, b)
+    else
+      singletonBuffer (Binop ("cmp", a, b))
+    fi;
+    base  <+> move(L (0), eax) <+ Set (suffix (op), "%al") <+> move(eax, res)
+}
+
+fun toBool(a) {
+    move (L(0), eax) <+> cmp(a, eax, "!=", a)
+}
+
+fun compileBinop(env, code, op) {
+  fun basic(a, b, op, res) {
+    if stackOpnd (a) then
+      move(b, eax) <+ Binop (op, a, eax) <+> move(eax, res)
+    else
+      singletonBuffer (Binop (op, a, b)) <+> move(b, res)
+    fi
   }
 
-  compile (env, code) 
+  fun div(a, b, op, res) {
+    var reg = case op of
+      "/" -> eax
+    | "%" -> edx
+    esac;
+    if stackOpnd (a) then
+      move(b, eax) <+> move(a, edx) <+ Cltd <+ IDiv (edx) <+> move(reg, res)
+    else
+      move(b, eax) <+ Cltd <+ IDiv (a) <+> move(reg, res)
+    fi
+  }
+
+  fun logic(a, b, op, res) {
+    toBool(a) <+> toBool(b) <+ Binop(op, a, eax) <+> move(eax, res)
+  }
+
+  fun select(op) {
+    case op of
+      "+"  -> basic
+    | "*"  -> basic
+    | "-"  -> basic
+    | "/"  -> div
+    | "%"  -> div
+    | "<"  -> cmp
+    | "<=" -> cmp
+    | ">=" -> cmp
+    | ">"  -> cmp
+    | "==" -> cmp
+    | "!=" -> cmp
+    | "&&" -> logic
+    | "!!" -> logic
+    | _    -> failure("Operation %s is not yet implemented\n", op)
+    esac
+  }
+
+  case env.pop2 of
+    [a, b, env] -> case env.allocate of
+      [res, env] ->
+        [env, code <+> select(op) (a, b, op, res)]
+    esac
+  esac
 }
 
 -- A top-level codegeneration function. Takes a driver's environment and a stack machine program,
@@ -456,19 +540,19 @@ public fun compileX86 (args, code) {
   case compile (initEnv (), code) of
     [env, code] ->
        var asmFile = args.getBaseName ++ ".s",
-             runtime = case getEnv ("LAMA_RUNTIME") of
-                         #val -> "../runtime/"
-                       | path     -> path
-                       esac ++ "/runtime.o";
+           runtime = case getEnv ("LAMA_RUNTIME") of
+                       #val -> "../runtime/"
+                     | path -> path
+                     esac ++ "/runtime.o";
 
        fwrite (asmFile,
-               map (insnString, 
+               map (insnString,
                     getBuffer $
                       singletonBuffer (Meta ("\t.global\tmain\n")) <+>
                       dataSection (listBuffer $ map (dataDef, getGlobals (env))) <+>
                       codeSection (code)
                    ).stringcat);
-                    
+
        system ({"gcc -g -m32 -o ", args.getBaseName, " ", runtime, " ", asmFile}.stringcat)
   esac
 }
