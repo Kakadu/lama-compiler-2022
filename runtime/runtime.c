@@ -1,3 +1,4 @@
+#define _GNU_SOURCES
 # include <stdio.h>
 # include <stdlib.h>
 # include <stdarg.h>
@@ -136,7 +137,9 @@ extern void* Bsexp (int bn, ...) {
   data   *d;  
   int n = UNBOX(bn);
 
+  __pre_gc();
   r = (sexp*) alloc (sizeof(int) * (n+1));
+  __post_gc();
   d = &(r->contents);
   r->tag = 0;
     
@@ -164,7 +167,9 @@ void* Barray (int n0, ...) {
   int     i, ai; 
   data    *r; 
 
+  __pre_gc();
   r = (data*) alloc (sizeof(int) * (n+1));
+  __post_gc();
 
   r->tag = ARRAY_TAG | (n << 3);
   
@@ -537,15 +542,56 @@ static size_t *current;   // Pointer to the free space begin in active space
 static size_t SPACE_SIZE = 8;
 # define POOL_SIZE (2*SPACE_SIZE)
 
+static void init_space (pool *p)
+{
+    p->size = SPACE_SIZE;
+    p->begin = mmap(NULL, SPACE_SIZE * sizeof(size_t), PROT_READ | PROT_WRITE,
+                    MAP_PRIVATE | MAP_ANONYMOUS | MAP_32BIT, -1, 0);
+    if (p->begin == MAP_FAILED)
+    {
+        perror("failed to map");
+        exit(1);
+    }
+
+    p->end = p->begin + p->size;
+    p->current = p->begin;
+}
+
 // @init_to_space initializes to_space
 // @flag is a flag: if @SPACE_SIZE has to be increased or not
-static void init_to_space (int flag) { NIMPL }
+static void init_to_space (int flag)
+{
+    if (flag)
+        SPACE_SIZE *= 2;
+
+    init_space(&to_space);
+}
 
 // @free_pool frees memory pool p
-static int free_pool (pool * p) { NIMPL }
+static int free_pool (pool * p)
+{
+    int rc = munmap(p->begin, p->size);
+
+    if (rc != 0)
+    {
+        perror("failed to unmap");
+        return rc;
+    }
+
+    memset(p, 0, sizeof(*p));
+
+    return rc;
+}
 
 // swaps active and passive spaces
-static void gc_swap_spaces (void) { NIMPL }
+static void gc_swap_spaces (void)
+{
+    pool tmp = from_space;
+
+    from_space = to_space;
+    to_space = tmp;
+    /* from_space.current = from_space.begin; */
+}
 
 // checks if @p is a valid pointer to the active (from-) space
 # define IS_VALID_HEAP_POINTER(p)\
@@ -566,28 +612,136 @@ extern size_t * gc_copy (size_t *obj);
 
 // @copy_elements
 //   1) copies @len words from @from to @where
-//   2) calls @gc_copy for those of these words which are valid pointers to from_space
-static void copy_elements (size_t *where, size_t *from, int len) { NIMPL }
+//   2) calls @gc_copy for those of these words which are valid pointers to
+//   from_space
+static void copy_elements(size_t *where, size_t *from, int len)
+{
+    int i;
+
+    for (i = 0; i < len; i++, where++, from++)
+    {
+        if (IS_VALID_HEAP_POINTER((size_t *)*from))
+            *where = gc_copy((size_t *)*from);
+        else
+            *where = *from;
+    }
+}
+
+static void extend_space (pool *p)
+{
+    p->begin = mremap(p->begin, p->size, p->size * 2, 0);
+    if (p->begin == MAP_FAILED)
+    {
+        perror("failed to remap");
+        exit(1);
+    }
+
+    p->size *= 2;
+    p->end = p->begin + p->size;
+}
 
 // @extend_spaces extends size of both from- and to- spaces
-static void extend_spaces (void) { NIMPL }
+static void extend_spaces (void)
+{
+    extend_space(&to_space);
+    extend_space(&from_space);
+}
 
 // @gc_copy takes a pointer to an object, copies it
 //   (i.e. moves from from_space to to_space)
 //   , rests a forward pointer, and returns new object location.
-extern size_t * gc_copy (size_t *obj) { NIMPL }
+extern size_t * gc_copy (size_t *obj)
+{
+    data *d = TO_DATA(obj);
+
+    if (IS_FORWARD_PTR((size_t *)d->tag))
+        return (size_t *)d->tag;
+
+    switch (TAG(d->tag))
+    {
+        case STRING_TAG:
+        {
+            size_t *res;
+            size_t len, div, rem;
+
+            *(to_space.current++) = d->tag;
+
+            res = to_space.current;
+            d->tag = res;
+            len = LEN(TO_DATA(res)->tag);
+            div = len / sizeof(size_t);
+            rem = len % sizeof(size_t) != 0;
+            to_space.current += div + rem;
+            strcpy((char*)res, (char*)obj);
+
+            return res;
+        }
+
+        case ARRAY_TAG:
+        {
+            size_t *res;
+            size_t len;
+
+            *(to_space.current++) = d->tag;
+
+            res = to_space.current;
+            len = LEN(TO_DATA(res)->tag);
+            to_space.current += len;
+            d->tag = res;
+            copy_elements(res, obj, len);
+
+            return res;
+        }
+
+        case SEXP_TAG:
+        {
+            size_t *res;
+            size_t len;
+            sexp *s = TO_SEXP(obj);
+
+            *(to_space.current++) = s->tag;
+            *(to_space.current++) = s->contents.tag;
+
+            res = to_space.current;
+            len = LEN(TO_DATA(res)->tag);
+            to_space.current += len;
+            s->contents.tag = res;
+            copy_elements(res, obj, len);
+
+            return res;
+        }
+
+        default:
+            assert(0);
+    }
+}
 
 // @gc_test_and_copy_root checks if pointer is a root (i.e. valid heap pointer)
 //   and, if so, calls @gc_copy for each found root
-extern void gc_test_and_copy_root (size_t ** root) { NIMPL }
+extern void gc_test_and_copy_root (size_t **root)
+{
+    if (IS_VALID_HEAP_POINTER(*root))
+        *root = gc_copy(*root);
+}
 
 // @gc_root_scan_data scans static area for root
 //   for each root it calls @gc_test_and_copy_root
-extern void gc_root_scan_data (void) { NIMPL }
+extern void gc_root_scan_data (void)
+{
+    size_t *i;
+
+    for (i = &__gc_data_start; i < &__gc_data_end; i++)
+        gc_test_and_copy_root((size_t **)i);
+}
 
 // @init_pool is a memory pools initialization function
 //   (is called by L__gc_init from runtime/gc_runtime.s)
-extern void init_pool (void) { NIMPL }
+extern void init_pool (void)
+{
+    init_space(&to_space);
+    init_space(&from_space);
+    init_extra_roots();
+}
 
 // @gc performs stop-the-world mark-and-copy garbage collection
 //   and extends pools (i.e. calls @extend_spaces) if necessarily
@@ -599,10 +753,43 @@ extern void init_pool (void) { NIMPL }
 //   2) call @__gc_root_scan_stack (finds roots in program stack
 //        and calls @gc_test_and_copy_root for each found root)
 //   3) extends spaces if there is not enough space to be allocated after gc
-static void * gc (size_t size) { NIMPL }
+static void * gc (size_t size)
+{
+    int i;
+
+    gc_root_scan_data();
+    __gc_root_scan_stack();
+
+    for (i = 0; i < extra_roots.current_free; i++)
+        gc_test_and_copy_root((size_t **)extra_roots.roots[i]);
+
+    while (to_space.current + size > to_space.end)
+        extend_spaces();
+
+    gc_swap_spaces();
+
+    to_space.current = to_space.begin;
+
+    return alloc(size);
+}
 
 // @alloc allocates @size memory words
 //   it enaibles garbage collection if out-of-memory,
 //   i.e. calls @gc when @current + @size > @from_space.end
 // returns a pointer to the allocated block of size @size
-extern void * alloc (size_t size) { NIMPL }
+extern void * alloc (size_t size)
+{
+    size_t *res;
+
+    /* size = (size - 1) / sizeof(size_t) + 1; */
+    size = size / sizeof(size_t) + (size % sizeof(size_t) != 0);
+
+    if (from_space.current + size > from_space.end)
+        gc(size);
+
+    res = from_space.current;
+    from_space.current += size;
+
+    return res;
+}
+
