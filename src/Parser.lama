@@ -224,37 +224,88 @@ var
                           None        -> returnST $ Sexp (x, {})
                         | Some (args) -> chainST (args) => fun (args) {Sexp (x, args)}
                         esac, loc)}
-    } |
-  
-    $(failure ("the rest of primary parsing in not implemented\n"))),
-   
+    } |  
+        e=inbr[s ("("), scopeExpr, s (")")]                   { e }
+      | loc=pos kSkip                                   { fun (a) { assertVoid (a, returnST $ Skip, loc) } } 
+      | loc=pos kIf e=exp kThen s1=scopeExpr s2=elsePart? kFi { fun (a) {
+                                                                    e(Val) =>> fun (e) {
+                                                                      s1(a) =>> fun (s1) {
+                                                                        case s2 of Some (s2) -> s2 (a) | None -> assertVoid(a, returnST $ Skip, loc) esac => fun (s2) {
+                                                                          If(e, s1, s2)
+                                                                        }
+                                                                      }
+                                                                    }
+                                                                  }
+                                                                }
+      | loc=pos kCase e=exp kOf brs=listBy[syntax (p=pattern s["->"] s=scopeExpr
+                                                              { fun (a) { p (0) =>> fun (p) { s (a) => fun (s) { [p, s] } } } }),
+                                                                s ("|")] kEsac {
+                                                                fun (a) {
+                                                                  e(Val) =>> fun (e) {
+                                                                    chainST (map (fun (br) { br(a) }, brs)) =>> fun (brs) {
+                                                                      freshName => fun (x) {
+                                                                        Scope (
+                                                                          { Val ({ x }) },
+                                                                          Seq (Ignore (Set(x, e)), Case (x, reifyPatternBindings (x, brs), loc))
+                                                                        )
+                                                                      }
+                                                                    }
+                                                                  }
+                                                                }
+                                                              }
+      | loc=pos kWhile cond=exp kDo body=scopeExpr kOd        { fun (a) {
+                                                                  assertVoid(
+                                                                    a,
+                                                                    cond (Val) =>> fun (cond) { body (Void) => fun (body) { While(cond, body) } },
+                                                                    loc
+                                                                  )
+                                                                } 
+                                                              }
+      | loc=pos kDo body=scopeExpr kWhile cond=scopeExpr kOd  { fun (a) {
+                                                                  assertVoid(
+                                                                    a,
+                                                                    body (Void) =>> fun (body) { cond (Val) => fun (cond) { distributeScope (body, fun (body) { DoWhile (body, cond) }) } },
+                                                                    loc
+                                                                  )
+                                                                }
+                                                              }
+      | loc=pos kFor decl=scopeExpr s[","] cond=exp s[","] succ=exp kDo body=scopeExpr kOd
+                                                              { fun (a) {
+                                                                assertVoid(
+                                                                  a,
+                                                                  decl (Void) =>> fun (decl) {
+                                                                    cond (Val) =>> fun (cond) {
+                                                                      body (Void) =>> fun (body) {
+                                                                        succ (Void) => fun (succ) {
+                                                                          distributeScope (decl, fun (decl) { Seq (decl, While (cond, Seq (body, succ))) })
+                                                                        }
+                                                                      }
+                                                                    }
+                                                                  },
+                                                                  loc
+                                                                )
+                                                              } 
+                                                              }
+    ),
 
-                                        e=inbr[s ("("), scopeExpr, s (")")]                   { e }
-                                      | loc=pos kSkip                                   { fun (a) { assertVoid (a, Skip, loc) } } 
-                                      | loc=pos kIf el=elseItem                               { fun (a) { el (a) } }
-                                      | loc=pos kWhile cond=exp kDo body=scopeExpr kOd        { fun (a) { assertVoid (a, While (cond (Val), body (Void)), loc) } }
-                                      | loc=pos kDo body=scopeExpr kWhile cond=scopeExpr kOd  { fun (a) {
-                                                                                                distributeScope (
-                                                                                                  body (Void),
-                                                                                                  fun (body) {  
-                                                                                                    assertVoid (a, DoWhile (body, cond (Val)), loc) 
-                                                                                                  } 
-                                                                                                )}
-                                                                                              }
-                                      | loc=pos kFor decl=scopeExpr s[","] cond=exp s[","] succ=exp kDo body=scopeExpr kOd
-                                                                                              { fun (a) {
-                                                                                                distributeScope (
-                                                                                                  decl (Void),
-                                                                                                  fun (decl) {
-                                                                                                    assertVoid (a, 
-                                                                                                                Seq (decl, 
-                                                                                                                      While (cond (Val), 
-                                                                                                                        Seq (body (Void), succ (Void)))), 
-                                                                                                                loc)
-                                                                                                  }
-                                                                                                )} 
-                                                                                              }
-                                    ),
+  pattern = memo $ eta syntax (
+      x=decimal { fun (_) { returnST $ Const (stringInt (x)) } }
+    | s ["_"] { fun (_) { returnST $ Wildcard } }
+    | ps=inbr [s ("["), list0 (syntax (p=pattern { p (0) })), s ("]")] {
+        fun (_) { chainST (ps) => fun (ps) { Array (ps) } }
+      }
+    | x=uident ps=inbr [s ("("), list0 (syntax (p=pattern { p(0) })), s (")")]? {
+        fun (_) { case 
+                    ps of None -> returnST $ { }
+                  | Some (ps) -> chainST (ps)
+                  esac => fun (ps) { Sexp (x, ps) } 
+                }
+      }
+    | x=lident s ["@"] p=pattern { fun (_) { p(0) => fun (p) { Named (x, p) } } }
+    | x=lident { fun (_) { returnST $ Named (x, Wildcard) } }
+    | inbr [s ("("), pattern, s (")")]
+  ),
+
   basic = memo $ eta (
     expr ({[Right, {[s (":="), fun (l, loc, r) {
                                  fun (a) {assertValue (a, l (Ref) =>> fun (l) {
@@ -343,15 +394,11 @@ var
    }
   );
 
-var elseItem = memo $ eta syntax (
-  cond=exp kThen body=scopeExpr
-  end = (
-      kElif el=elseItem { fun (a) { If (cond (Val), body (a), el (a)) } }
-    | kElse el=scopeExpr kFi  { fun (a) { If (cond (Val), body (a), el (a)) } }
-    | kFi               { fun (a) { assertVoid (a, If (cond (Val), body (Void), Skip), loc) } }
-  )
-
-  { end }
+var elsePart = memo $ eta syntax (
+    kElif e=exp kThen s1=scopeExpr s2=elsePart {
+      fun (a) { e(Val) =>> fun (e) { s1(a) =>> fun (s1) { s2(a) => fun (s2) { If(e, s1, s2) } } } }
+    } |
+    -kElse scopeExpr
 );
 
 -- Public top-level parser

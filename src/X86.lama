@@ -634,6 +634,24 @@ fun compile (args, env, code) {
       esac
     }
 
+    fun saveRegs(env, depth) {
+      foldl(
+        fun ([pushes, pops], r) { [pushes <+ Push(r), singletonBuffer(Pop(r)) <+> pops] },
+        [emptyBuffer(), emptyBuffer()],
+        liveRegisters(env, depth)
+      )
+    }
+
+    fun pushArgs(env, pushArgsCode, n) {
+      if n == 0
+        then [env, pushArgsCode]
+        else
+          case pop(env) of
+            [x, env] -> pushArgs(env, pushArgsCode <+ Push(x), n - 1)
+          esac
+      fi
+    }
+
     foldl (
       fun ([env, scode], i) {
         var code = scode <+ Meta ("# " ++ showSMInsn (i) ++ "\n");
@@ -679,7 +697,7 @@ fun compile (args, env, code) {
             case env.pop2 of
               [x, y, env] -> [env.push (y), code <+> compileBinop (op, x, y)]
             esac
-        | LABEL (l) ->
+        | LABEL (l, _) ->
             if isBarrier (env)
             then [retrieveStack (env, l), code <+ Label (l)] 
             else [env, code <+ Label (l)]
@@ -752,33 +770,87 @@ fun compile (args, env, code) {
                   ]
               esac
           esac
-        | SEXP (s, n) ->
-          case addString (env, s) of
-            [env, sn] ->
-              case compileArgs (env, n) of
-                [env, argsCode, callCode] ->
-                  case env.allocate of
-                    [s, env] ->
-                      [env, code <+>
-                            pushRegs () <+
-                            Push (M (sn)) <+>
-                            argsCode <+
-                            Push (L (makeBox(n + 1))) <+
-                            Call ("Bsexp") <+
-                            Pop (edi) <+>
-                            callCode <+
-                            Pop (edi) <+>
-                            popRegs () <+>
-                            move (eax, s)
-                      ]
-                  esac
-              esac
-          esac
+        | SEXP (x, n)          ->
+            case saveRegs (env, 0) of
+              [pushRegsCode, popRegsCode] ->
+                case pushArgs (env, emptyBuffer (), n) of
+                  [env, pushElemsCode] ->
+                    case allocate (env) of
+                      [s, env] -> [env, code <+>
+                                        pushRegsCode <+
+                                        Push (L (makeBox (tagHash (x)))) <+>
+                                        pushElemsCode <+
+                                        Push(L(makeBox(n + 1))) <+
+                                        Call("Bsexp") <+
+                                        Binop("+", L(wordSize * (n + 2)), esp) <+>
+                                        popRegsCode <+
+                                        Mov(eax, s)
+                                  ]
+                    esac
+                esac
+            esac
         | DUP ->
             var x = peek(env);
             case allocate(env) of
               [s, env] -> [env, code <+ if memOpnd(x) then Mov(x, eax) <+ Mov(eax, s) else Mov(x, s) fi]
             esac
+        | META (m)             ->
+            case m of
+              MF([line, col]) ->
+                case compile (env, { STRING ("main") }) of
+                  [env, fnameCode] ->
+                    case allocate (env) of
+                      [lineS, env] ->
+                        case allocate (env) of
+                          [colS, env] ->
+                            case compile (env, { CALL ("Bmatch_failure", 4) }) of
+                              [env, callCode] -> [env, code <+>
+                                                       fnameCode <+
+                                                       Mov (L (line), lineS) <+
+                                                       Mov (L (col), colS) <+>
+                                                       callCode
+                                                 ]
+                            esac
+                        esac
+                    esac
+                esac
+            esac
+        | PATT (pat)           ->
+          case pat of
+              Sexp (x, n) ->
+                case allocate (env) of
+                  [xS, env] ->
+                    case allocate (env) of
+                      [nS, env] ->
+                        case compile (env, { CALL ("Btag", 3) }) of
+                          [env, callCode] -> [env, code <+
+                                                   Mov (L (makeBox (tagHash (x))), xS) <+
+                                                   Mov (L (makeBox (n)), nS) <+>
+                                                   callCode
+                                             ]
+                        esac
+                    esac
+                esac
+            | Tag (tag, n) ->
+              case allocate (env) of [s1, env] ->
+                case allocate (env) of [s2, env] ->
+                  case call (env, "Btag", 3) of [env, callCode] ->
+                    [env, code <+> move (L (makeBox (tagHash (tag))), s1) <+>
+                          move (L (makeBox (n)), s2) <+> callCode]
+                  esac
+                esac
+              esac
+            | Array (n)   ->
+              case allocate (env) of
+                [s, env] ->
+                  case compile (env, { CALL ("Barray_patt", 2) }) of
+                    [env, callCode] -> [env, code <+
+                                             Mov (L (makeBox (n)), s) <+>
+                                             callCode
+                                       ]
+                  esac
+              esac
+          esac
         | _ -> failure ("codegeneration for instruction %s is not yet implemented\n", i.string)
         esac
         fi

@@ -135,6 +135,7 @@ fun eval (c@[st, w], expr) {
     | Scope (ds, e)           -> case eval ([foldl (fun (st, def) {
                                               case def of 
                                                 Var (ds)  -> addNames (st, ds)
+                                              | Val (ds)  -> addNames (st, ds)
                                               | Fun (name, args, body) -> addFunction (st, name, args, body)
                                               esac
                                               }, st.enterScope, ds),
@@ -185,6 +186,35 @@ fun eval (c@[st, w], expr) {
                                  esac
     | Set (x, e)              -> case eval (c, e) of 
                                   [[st, w], v] -> [[st <- [x, Val (v)], w], v]
+                                 esac
+    | Case(x, brs, loc)       -> case lookupVal (st, x) of
+                                   Val (v) ->
+                                     fun match (p, v) {
+                                       case [p, v] of
+                                           [Wildcard, _] -> true
+                                         | [Const (n), #val] -> n == v
+                                         | [Array (ps), #array] ->
+                                           var vs = arrayList (v);
+                                           if (size (ps) == size (vs))
+                                           then foldl (fun (acc, [p, v]) {
+                                                        acc && match (p, v) 
+                                                      },
+                                                      true,
+                                                      zip (ps, vs))
+                                           else false fi
+                                         | [Sexp (x1, ps), Sexp (x2, vs)] -> if (compare (x1, x2) == 0)
+                                                                             then match (Array (ps), vs)
+                                                                             else false
+                                                                             fi
+                                         | [Named (_, p), _] -> match (p, v)
+                                         | _ -> false
+                                       esac
+                                     }
+
+                                     case brs of
+                                         { }           -> error(sprintf("match failure, value %s", string(v)), loc)
+                                       | [p, br] : brs -> if (match(p, v)) then eval(c, br) else eval(c, Case(x, brs, loc)) fi
+                                     esac
                                  esac
     | _ -> failure ("this eval: {%s} is not yet implemented\n", expr.string)
   esac
