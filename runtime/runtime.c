@@ -10,6 +10,16 @@
 		       __func__, __FILE__, __LINE__);			\
   exit(1);
 
+#define SHOULD_NOT_REACH fprintf (stderr, "Should not reach: "			\
+		       "function %s at file %s, line %d", \
+		       __func__, __FILE__, __LINE__);			\
+  exit(1);
+
+#define OUT_OF_MEMORY fprintf (stderr, "Out of memory: "			\
+		       "function %s at file %s, line %d", \
+		       __func__, __FILE__, __LINE__);			\
+  exit(1);
+
 extern void nimpl (void) { NIMPL }
 extern void __pre_gc  ();
 extern void __post_gc ();
@@ -136,7 +146,9 @@ extern void* Bsexp (int bn, ...) {
   data   *d;  
   int n = UNBOX(bn);
 
+  __pre_gc ();
   r = (sexp*) alloc (sizeof(int) * (n+1));
+  __post_gc ();
   d = &(r->contents);
   r->tag = 0;
     
@@ -164,7 +176,9 @@ void* Barray (int n0, ...) {
   int     i, ai; 
   data    *r; 
 
+  __pre_gc ();
   r = (data*) alloc (sizeof(int) * (n+1));
+  __post_gc ();
 
   r->tag = ARRAY_TAG | (n << 3);
   
@@ -545,11 +559,9 @@ typedef struct {
 
 static pool   from_space; // From-space (active ) semi-heap
 static pool   to_space;   // To-space   (passive) semi-heap
-static size_t *current;   // Pointer to the free space begin in active space
 
-// initial semi-space size
-static size_t SPACE_SIZE = 8;
-# define POOL_SIZE (2*SPACE_SIZE)
+// initial semi-space size (in bytes)
+static size_t SPACE_SIZE = 64;
 
 // @init_to_space initializes to_space
 // @flag is a flag: if @SPACE_SIZE has to be increased or not
@@ -559,7 +571,12 @@ static void init_to_space (int flag) { NIMPL }
 static int free_pool (pool * p) { NIMPL }
 
 // swaps active and passive spaces
-static void gc_swap_spaces (void) { NIMPL }
+static void gc_swap_spaces (void) {
+    pool tmp = to_space;
+    to_space = from_space;
+    from_space = tmp;
+    to_space.current = to_space.begin;
+}
 
 // checks if @p is a valid pointer to the active (from-) space
 # define IS_VALID_HEAP_POINTER(p)\
@@ -577,31 +594,178 @@ static void gc_swap_spaces (void) { NIMPL }
   (!UNBOXED(p) && IN_PASSIVE_SPACE(p))
 
 extern size_t * gc_copy (size_t *obj);
+static void * gc (size_t size);
 
-// @copy_elements
-//   1) copies @len words from @from to @where
-//   2) calls @gc_copy for those of these words which are valid pointers to from_space
-static void copy_elements (size_t *where, size_t *from, int len) { NIMPL }
+static void extend_space(pool *space) {
+    size_t new_size = space->size + SPACE_SIZE;
+    size_t current_diff = space->current - space->begin;
+    size_t* new_begin = malloc (new_size);
+    if(new_begin == NULL) {
+        OUT_OF_MEMORY
+    }
+    size_t* new_end = ((void*) new_begin) + new_size;
+    for(size_t i = 0; i < current_diff; i++) {
+        size_t p = space->begin[i];
+        if(!UNBOXED(p)) {
+            size_t diff = ((size_t*) p) - space->begin;
+            new_begin[i] = new_begin + diff;
+        } else {
+            new_begin[i] = p;
+        }
+    }
+    free(space->begin);
+    space->begin = new_begin;
+    space->end = new_end;
+    space->current = new_begin + current_diff;
+    space->size = new_size;
+}
 
 // @extend_spaces extends size of both from- and to- spaces
-static void extend_spaces (void) { NIMPL }
+static void extend_spaces (void) {
+    extend_space(&to_space);
+    gc(0); // this forces to move all objects from from_space to to_space
+    extend_space(&to_space); // gc swaps spaces, and now we need to enlarge this
+}
+
+static size_t* gc_copy_string(size_t* obj) {
+    data* obj_data = TO_DATA(obj);
+    size_t n = LEN(obj_data->tag);
+    size_t data_len = n + 1 + sizeof(int); // FIXME same as in alloc Bstring, maybe should extract
+    memcpy(to_space.current, obj_data, data_len);
+    size_t* forward = (size_t*) ((data*) to_space.current)->contents;
+    to_space.current = (size_t*) (((void*) to_space.current) + data_len);
+    return forward;
+}
+
+static size_t* gc_copy_array(size_t* obj) {
+    data* obj_data = TO_DATA(obj);
+    size_t n = LEN(obj_data->tag);
+    size_t data_len = sizeof(int) * (n + 1); // FIXME same as in alloc Barray, maybe should extract
+    memcpy(to_space.current, obj_data, data_len);
+    size_t* forward = (size_t*) ((data*) to_space.current)->contents;
+    to_space.current = (size_t*) (((void*) to_space.current) + data_len);
+    return forward;
+}
+
+static size_t* gc_copy_sexp(size_t* obj) {
+    data* obj_data = TO_DATA(obj);
+    sexp* obj_sexp = TO_SEXP(obj);
+    size_t n = LEN(obj_data->tag);
+    size_t sexp_len = sizeof(int) * (n + 2); // FIXME same as in alloc Bsexp, maybe should extract
+    memcpy(to_space.current, obj_sexp, sexp_len);
+    size_t* forward = (size_t*) ((sexp*) to_space.current)->contents.contents;
+    to_space.current = (size_t*) (((void*) to_space.current) + sexp_len);
+    return forward;
+}
+
+static void gc_copy_all_pointers (size_t *obj) {
+    data* obj_data = TO_DATA(obj);
+    size_t n;
+    switch (TAG(obj_data->tag)) {
+        case ARRAY_TAG:
+        case SEXP_TAG:
+            n = LEN(obj_data->tag);
+            break;
+        default:
+            return;
+    }
+    for(int i = 0; i < n; i++) {
+        size_t** derived = (((size_t*)obj_data->contents) + i);
+        size_t* p = *derived;
+        if(IS_VALID_HEAP_POINTER(p)) {
+            gc_copy (p);
+            *derived = *(p - 1); // forward pointer
+        }
+    }
+}
 
 // @gc_copy takes a pointer to an object, copies it
 //   (i.e. moves from from_space to to_space)
-//   , rests a forward pointer, and returns new object location.
-extern size_t * gc_copy (size_t *obj) { NIMPL }
+//   , returns new object location.
+extern size_t * gc_copy (size_t *obj) {
+    if(IS_FORWARD_PTR(*(obj - 1))) return *obj;
+
+    data* obj_data = TO_DATA(obj);
+    size_t* forward;
+    fflush(stdout);
+    switch (TAG(obj_data->tag)) {
+        case STRING_TAG:
+            forward = gc_copy_string(obj);
+            break;
+        case ARRAY_TAG:
+            forward = gc_copy_array(obj);
+            break;
+        case SEXP_TAG:
+            forward = gc_copy_sexp(obj);
+            break;
+        default:
+            SHOULD_NOT_REACH
+    }
+    *(obj - 1) = forward;
+    gc_copy_all_pointers(forward);
+    return forward;
+}
 
 // @gc_test_and_copy_root checks if pointer is a root (i.e. valid heap pointer)
 //   and, if so, calls @gc_copy for each found root
-extern void gc_test_and_copy_root (size_t ** root) { NIMPL }
+extern void gc_test_and_copy_root (size_t ** root) {
+    size_t* p = *root;
+    if(IS_VALID_HEAP_POINTER(p)) {
+        gc_copy(p);
+        *root = *(p - 1); // forward pointer
+    }
+}
 
 // @gc_root_scan_data scans static area for root
 //   for each root it calls @gc_test_and_copy_root
-extern void gc_root_scan_data (void) { NIMPL }
+static void gc_root_scan_data (void) {
+    for(size_t** p = &__gc_data_start; p < &__gc_data_end; p++) { // TODO why we use size_t if in fact it`s 32 bit compiler and in other places we use int...
+        gc_test_and_copy_root(p);
+    }
+    for(int i = 0; i < extra_roots.current_free; i++) { // TODO why we use size_t if in fact it`s 32 bit compiler and in other places we use int...
+        gc_test_and_copy_root(extra_roots.roots[i]);
+    }
+}
+
+extern void gc_root_scan_stack_impl(size_t** stack_bottom, size_t** stack_top) {
+    size_t **frame_top = stack_top + 2,
+           **frame_bottom = *stack_top;
+    while(frame_bottom < stack_bottom) {
+        for(size_t** p = frame_top; p < frame_bottom; p++) {
+            gc_test_and_copy_root(p);
+        }
+
+        frame_top = frame_bottom + 2;
+        frame_bottom = *frame_bottom;
+    }
+    for(size_t** p = frame_top; p < frame_bottom; p++) { // last frame for main function
+        gc_test_and_copy_root(p);
+    }
+}
+
+static void alloc_semi_space(pool* semi_space) {
+    size_t* begin = malloc (SPACE_SIZE);
+    if(begin == NULL) {
+        OUT_OF_MEMORY
+    }
+    *semi_space = (pool) {
+        begin,
+        ((void*) begin) + SPACE_SIZE,
+        begin,
+        SPACE_SIZE
+    };
+}
 
 // @init_pool is a memory pools initialization function
 //   (is called by L__gc_init from runtime/gc_runtime.s)
-extern void init_pool (void) { NIMPL }
+extern void init_pool (void) {
+    // TODO now i expect that to_space and from_space might be in any peace of heap, but maybe i should make then near?
+    //      if i`ll change this function it is need to change extend_spaces too
+    alloc_semi_space(&from_space);
+    alloc_semi_space(&to_space);
+
+    init_extra_roots();
+}
 
 // @gc performs stop-the-world mark-and-copy garbage collection
 //   and extends pools (i.e. calls @extend_spaces) if necessarily
@@ -613,10 +777,25 @@ extern void init_pool (void) { NIMPL }
 //   2) call @__gc_root_scan_stack (finds roots in program stack
 //        and calls @gc_test_and_copy_root for each found root)
 //   3) extends spaces if there is not enough space to be allocated after gc
-static void * gc (size_t size) { NIMPL }
+static void * gc (size_t size) {
+    gc_root_scan_data();
+    __gc_root_scan_stack();
+    gc_swap_spaces();
+    if(((void*) from_space.current) + size >= from_space.end) {
+        extend_spaces();
+    }
+    return from_space.current;
+}
 
 // @alloc allocates @size memory words
 //   it enaibles garbage collection if out-of-memory,
 //   i.e. calls @gc when @current + @size > @from_space.end
 // returns a pointer to the allocated block of size @size
-extern void * alloc (size_t size) { NIMPL }
+extern void * alloc (size_t size) {
+    while(((void*) from_space.current) + size >= from_space.end) gc (size);
+
+    void* ret = from_space.current;
+    from_space.current = ((void*) from_space.current) + size;
+
+    return ret;
+}

@@ -15,14 +15,14 @@ __gc_stack_top:	        .long	0
 			.globl	__gc_stack_bottom
 			.extern	init_pool
 			.extern	gc_test_and_copy_root
+			.extern gc_root_scan_stack_impl
 			.extern nimpl
 			.text
 
 // ==================================================
 // Initialize @__gc_stack_bottom and call @init_pool
 L__gc_init:
-            movl	%esp, __gc_stack_bottom
-			addl	$4, __gc_stack_bottom
+            movl	%ebp, __gc_stack_bottom
 			call	init_pool
 			ret
 
@@ -31,14 +31,16 @@ L__gc_init:
 // then  set @__gc_stack_top to %ebp
 // else  return
 __pre_gc:
-			call nimpl
+            mov  %ebp, __gc_stack_top
+			ret
 
 // ==================================================
 // if __gc_stack_top was set by one of the callers
 // then return
 // else set __gc_stack_top to 0
 __post_gc:
-			call nimpl
+            movl  $0, __gc_stack_top
+			ret
 
 // ==================================================
 // Scan stack for roots
@@ -46,4 +48,9 @@ __post_gc:
 // till __gc_stack_bottom
 // and calls gc_test_and_copy_root for each found root
 __gc_root_scan_stack:
-			call nimpl
+            push __gc_stack_top
+            push __gc_stack_bottom
+			call gc_root_scan_stack_impl
+			pop %eax
+			pop %eax
+			ret
