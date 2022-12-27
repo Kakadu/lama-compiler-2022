@@ -162,56 +162,63 @@ var elseBody = memo $ eta syntax (
 );
 
 var primary = memo $ eta syntax (
-				    par[exp]
-			      | loc=pos kSkip { -- Skip
-				      fun (a) {
-				        assertVoid (a, Skip, loc)
-				      }
-		            }
-			      | loc=pos kRead x=par[lident] { -- Read (x)
-			          fun (a) {
-				        assertVoid (a, Ignore (Read (x)), loc)
-				      }
-				    }
-			      | loc=pos kWrite v=par[exp] { -- Write (v)
-				      fun (a) {
-				        assertVoid (a, Write (v (Val)), loc)
-				      }
-			        }
-			      | loc=pos kIf body=ifBody {	-- If
-				      fun (a) {
-				        body (a)
-				      }
-				    }
-			      | loc=pos kWhile cond=exp kDo x=exp kOd { -- While (cond, x)
-				      fun (a) {
-				        assertVoid (a, While(cond (Val), x (Void)), loc)
-				      }
-				    }
-			      | loc=pos kFor x=exp s[","] cond=exp s[","] z=exp kDo y=exp kOd { -- x;While (cond, y;z)
-				      fun (a) {
-				        assertVoid (
-				          a,
-				          Seq (x (Void), While(cond (Val), Seq (y (Void), z (Void)))),
-						  loc
-						)
-					  }
-					}
-				  | loc=pos kDo x=exp kWhile cond=exp kOd { -- DoWhile(x, cond)
-					  fun (a) {
-					    assertVoid (a, DoWhile(x (Void), cond (Val)), loc)
-					  }
-					}
-				  | loc=pos x=lident { -- Var (x) / Ref(x)
-                      fun(a) {
-                        ref (a, x, loc)
-                      }
-                    }
-                  | loc=pos n=decimal { -- Const (n)
-                      fun (a) {
-                        assertValue (a, Const (stringInt (n)), loc)
-                      }
-                    }
+        par[scopeExpr]
+      | loc=pos kSkip { -- Skip
+          fun (a) {
+              assertVoid (a, Skip, loc)
+          }
+        }
+      | loc=pos kRead x=par[lident] { -- Read (x)
+          fun (a) {
+            assertVoid (a, Ignore (Read (x)), loc)
+          }
+        }
+      | loc=pos kWrite v=par[exp] { -- Write (v)
+          fun (a) {
+            assertVoid (a, Write (v (Val)), loc)
+          }
+        }
+      | loc=pos kIf body=ifBody { -- If
+          fun (a) {
+            body (a)
+          }
+        }
+      | loc=pos kWhile cond=exp kDo x=scopeExpr kOd { -- While (cond, x)
+          fun (a) {
+            assertVoid (a, While(cond (Val), x (Void)), loc)
+          }
+        }
+      | loc=pos kFor x=scopeExpr s[","] cond=exp s[","] z=exp kDo y=scopeExpr kOd { -- x;While (cond, y;z)
+          fun (a) {
+            assertVoid (
+              a,
+              distributeScope(x (Void), fun (x) { Seq (x, While(cond (Val), Seq (y (Void), z (Void)))) }),
+              loc
+            )
+          }
+        }
+      | loc=pos kDo x=scopeExpr kWhile cond=exp kOd { -- DoWhile(x, cond)
+        fun (a) {
+            assertVoid (
+              a,
+              distributeScope(x (Void), fun (x) { DoWhile(x, cond (Val)) }),
+              loc
+            )
+          }
+        }
+      | loc=pos x=lident args=par[list0(syntax(e=exp {e(Val)}))]? { -- Val (x) / Ref (x) / Val (Call (x, args))
+          fun (a) {
+            case args of
+              None -> ref (a, x, loc)
+            | Some (args) -> assertValue (a, Call (x, args), loc)
+            esac
+          }
+        }
+      | loc=pos n=decimal { -- Const (n)
+          fun (a) {
+            assertValue (a, Const (stringInt (n)), loc)
+          }
+        }
     ),
     basic   = memo $ eta (expr (assignOp : binops({
                                   [Left, {"!!"}],
