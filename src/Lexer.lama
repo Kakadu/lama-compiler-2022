@@ -25,7 +25,9 @@ public fun getLoc (s) {
 var keywords =
    foldl (addSet,
           emptySet (compare),
-          {"skip",
+          {"read",
+           "write",
+           "skip",
            "if",
            "then",
            "else",
@@ -41,7 +43,9 @@ var keywords =
           });
 
 -- Regular expression definitions
-public rSkip        = createRegexp ("skip\\b", "skip"),
+public rRead        = createRegexp ("read\\b", """read"""),
+       rWrite       = createRegexp ("write\\b", """write"""),
+       rSkip        = createRegexp ("skip\\b", "skip"),
        rWhiteSpace  = createRegexp ("\\(\\([ \n\r\t]*\\)\\|\\(--[^\n]*[ \n\r\t]*\\)\\)*", "whitespace"),
        rDecimal     = createRegexp ("-?[0-9]+", "decimal constant"),
        rStrlit      = createRegexp ("""\\([^""]\\|""""\\)*""", "string constant"),
@@ -60,7 +64,7 @@ public rSkip        = createRegexp ("skip\\b", "skip"),
        rVar         = createRegexp ("var\\b", """var"""),
        rVal         = createRegexp ("val\\b", """val"""),
        rFun         = createRegexp ("fun\\b", """fun""");
-      
+
 var whiteSpace = token (rWhiteSpace);
 
 -- Public parsers for concrete tokens
@@ -68,7 +72,9 @@ var whiteSpace = token (rWhiteSpace);
 public fun s (t) {memo $ syntax (-whiteSpace token[t])}
 
 -- Some individual tokens
-public kSkip    = s (rSkip),
+public kRead    = s (rRead),
+       kWrite   = s (rWrite),
+       kSkip    = s (rSkip),
        kIf      = s (rIf),
        kThen    = s (rThen),
        kElse    = s (rElse),
@@ -79,7 +85,7 @@ public kSkip    = s (rSkip),
        kOd      = s (rOd),
        kFor     = s (rFor),
        kVar     = s (rVar),
-       kVal     = s (rVal),       
+       kVal     = s (rVal),
        kFun     = s (rFun),
        decimal  = s (rDecimal),
        chrlit   = syntax (x=s[rChar] {case substring (x, 1, x.length - 2) of
@@ -95,12 +101,12 @@ public kSkip    = s (rSkip),
                                             j := j + 1
                                         do
                                           x [j] := x [i];
-                                          i := i + if x[i] == '"' then 2 else 1 fi                                          
+                                          i := i + if x[i] == '"' then 2 else 1 fi
                                         od;
-                                        substring (x, 0, j)}), 
+                                        substring (x, 0, j)}),
        pos      = memo $ syntax (-whiteSpace loc),
        end      = memo $ syntax (-whiteSpace eof),
-       uident   = s (rUident), 
+       uident   = s (rUident),
        lident   = memo $ syntax (-whiteSpace located[
                                    fun (k) {
                                      fun (s) {
@@ -113,7 +119,5 @@ public kSkip    = s (rSkip),
                                           esac)
                                      }
                                    }
-       
+
                                 ]);
-
-
