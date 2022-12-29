@@ -100,10 +100,15 @@ fun addDefs(state, defs) {
 
 fun addArgs(state, names, values) {
   foldl (fun(s, [n, v]) {
-    case v of
-      L (v) -> s.addName(n, v)
-    esac
+    addName(s, n, v)
   }, state, zip(names, values))
+}
+
+public fun getData(arr) {
+  case arr of
+    Sexp (_, arr) -> arr
+  | _ -> arr
+  esac
 }
 
 -- Evaluates a list of expressions, properly threading a configurations.
@@ -123,9 +128,12 @@ fun evalList (c, exprs) {
 fun eval (c@[s, w], expr) {
   case expr of
     Assn (a, b) ->
-      case eval (c, a) of [c, R (x)] ->
-        case eval (c, b) of [c@[s, w], v@L (vi)] ->
-          [[s <- [x, vi], w], v]
+      case eval (c, a) of [c, x] ->
+        case eval (c, b) of [c@[s, w], v] ->
+          case x of
+            R (x) -> [[s <- [x, v], w], v]
+          | ElemRef (x, i) -> x[i] := v; [c, v]
+          esac
         esac
       esac
   | Seq (a, b) ->
@@ -133,32 +141,22 @@ fun eval (c@[s, w], expr) {
         eval (c, b)
       esac
   | Skip -> [c, E]
-  | Read (x) ->
-      case readWorld (w) of [v, w] ->
-        [[s <- [x, v], w], E]
-      esac
-  | Write (a) ->
-      case eval (c, a) of [c, L (v)] ->
-        case writeWorld (v, w) of w ->
-          [[s, w], E]
-        esac
-      esac
   | If (cond, a, b) ->
-      case eval (c, cond) of [c, L (v)] ->
+      case eval (c, cond) of [c, v] ->
         eval (c, if v then a else b fi)
       esac
   | While (cond, a) ->
-      case eval (c, cond) of [c, L (v)] ->
+      case eval (c, cond) of [c, v] ->
         eval(c, if v then Seq (a, expr) else Skip fi)
       esac
   | DoWhile (x, cond) -> eval (c, Seq (x, While (cond, x)))
-  | Var (x) -> [c, L (s.lookup(x))]
+  | Var (x) -> [c, lookup(s, x)]
   | Ref (x) -> [c, R (x)]
-  | Const (n) -> [c, L (n)]
+  | Const (n) -> [c, n]
   | Binop (op, a, b) ->
-      case eval (c, a) of [c, L (aval)] ->
-        case eval (c, b) of [c, L (bval)] ->
-          [c, L (evalOp (op, aval, bval))]
+      case eval (c, a) of [c, aval] ->
+        case eval (c, b) of [c, bval] ->
+          [c, evalOp (op, aval, bval)]
         esac
       esac
   | Ignore (a) ->
@@ -171,24 +169,52 @@ fun eval (c@[s, w], expr) {
           [[leaveScope(s), w], v]
         esac
       esac
-  | Call (f, as) -> s.lookupFun(f);
-      case s.lookup(f) of Fun(xs, b) ->
-        case evalList (c, as) of [[sf, w], vs] ->
-          case sf.enterFunction of sf ->
-            case sf.addArgs(xs, vs) of sf ->
-              case eval([sf, w], b) of [[sf, w], v] ->
-                [[s.leaveFunction (sf.getGlobal), w], v]
-              esac
-            esac
+  | Call (f, as) ->
+      case lookup(s, f) of Fun(xs, b) ->
+        case evalList (c, as) of
+          [[sf, w], vs] -> case b of
+            External -> case evalBuiltin(f, vs, w) of [v, w] ->
+                          [[s, w], v]
+                        esac
+          | _ ->  case enterFunction(sf) of sf ->
+                    case addArgs(sf, xs, vs) of sf ->
+                      case eval([sf, w], b) of [[sf, w], v] ->
+                        [[leaveFunction(s, getGlobal(sf)), w], v]
+                      esac
+                    esac
+                  esac
           esac
         esac
       esac
+  | String (s) -> [c, s]
+  | Array (as) ->
+    case evalList(c, as) of [c, vs] ->
+      [c, listArray (vs)]
+    esac
+  | Sexp (name, as) ->
+    case eval(c, Array (as)) of [c, as] ->
+      [c, Sexp (name, as)]
+    esac
+  | ElemRef (a, i) ->
+    case eval(c, a) of [c, a] ->
+      case eval(c, i) of [c, i] ->
+        [c, ElemRef (getData(a), i)]
+      esac
+    esac
+  | Elem (a, i) ->
+    case eval(c, a) of [c, a] ->
+      case eval(c, i) of [c, i] ->
+        [c, getData(a)[i]]
+      esac
+    esac
   esac
 }
 
 -- Evaluates a program with a given input and returns an output
 public fun evalExpr (input, expr) {
-  case eval ([emptyState (), createWorld (input)], expr) of
+  case eval ([emptyState ().enterScope.addName ("read",   Fun ({}, External))
+                                      .addName ("write",  Fun ({"a"}, External))
+                                      .addName ("length", Fun ({"a"}, External)), createWorld (input)], expr) of
     [c, _] -> c.snd.getOutput
   esac
 }

@@ -25,9 +25,7 @@ public fun getLoc (s) {
 var keywords =
    foldl (addSet,
           emptySet (compare),
-          {"read",
-           "write",
-           "skip",
+          {"skip",
            "if",
            "then",
            "else",
@@ -43,9 +41,7 @@ var keywords =
           });
 
 -- Regular expression definitions
-public rRead        = createRegexp ("read\\b", """read"""),
-       rWrite       = createRegexp ("write\\b", """write"""),
-       rSkip        = createRegexp ("skip\\b", "skip"),
+public rSkip        = createRegexp ("skip\\b", "skip"),
        rWhiteSpace  = createRegexp ("\\(\\([ \n\r\t]*\\)\\|\\(--[^\n]*[ \n\r\t]*\\)\\)*", "whitespace"),
        rDecimal     = createRegexp ("-?[0-9]+", "decimal constant"),
        rStrlit      = createRegexp ("""\\([^""]\\|""""\\)*""", "string constant"),
@@ -72,9 +68,7 @@ var whiteSpace = token (rWhiteSpace);
 public fun s (t) {memo $ syntax (-whiteSpace token[t])}
 
 -- Some individual tokens
-public kRead    = s (rRead),
-       kWrite   = s (rWrite),
-       kSkip    = s (rSkip),
+public kSkip    = s (rSkip),
        kIf      = s (rIf),
        kThen    = s (rThen),
        kElse    = s (rElse),

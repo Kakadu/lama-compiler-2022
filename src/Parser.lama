@@ -59,6 +59,10 @@ fun par(p) {
 	inbr(s("("), p, s(")"))
 }
 
+fun brak(p) {
+  inbr(s ("["), p, s ("]"))
+}
+
 -- A helper function to be used with super-combinator "expr"
 fun binopSyntax (op) {
   [syntax (pos -s[op]), fun (l, loc, r) {
@@ -175,7 +179,7 @@ var elseBody = memo $ eta syntax (
 
 var primary = memo $ eta syntax (
         -- array constant
-        loc=pos x=inbr[s("["), list0(syntax (e=exp {e(Val)})), s("]")] {fun (a) {assertValue (a, Array (x), loc)}}
+        loc=pos x=brak[list0(syntax (e=exp {e(Val)}))] {fun (a) {assertValue (a, Array (x), loc)}}
         -- string constant
         | loc=pos x=strlit                                               {fun (a) {assertValue (a, String (x), loc)}}
         -- character literal
@@ -183,7 +187,7 @@ var primary = memo $ eta syntax (
         -- decimal constant
         | loc=pos x=decimal                                              {fun (a) {assertValue (a, Const (stringInt (x)), loc)}}
         -- identifier
-        | x=lident args=inbr[s("("), list0(syntax(e=exp {e(Val)})), s(")")]? {fun (a) {
+        | x=lident args=par[list0(syntax(e=exp {e(Val)}))]? {fun (a) {
                                                                               case args of
                                                                                 None -> case a of
                                                                                           Ref  -> Ref (x)
@@ -194,7 +198,7 @@ var primary = memo $ eta syntax (
                                                                               esac
                                                                             }}
         -- S-expression
-        | loc=pos x=uident args=inbr[s("("), list0(syntax(e=exp {e(Val)})), s(")")]? {fun (a) {assertValue (a, Sexp (x, case args of
+        | loc=pos x=uident args=par[list0(syntax(e=exp {e(Val)}))]? {fun (a) {assertValue (a, Sexp (x, case args of
                                                                                                                         None        -> {}
                                                                                                                       | Some (args) -> args
                                                                                                                       esac), loc)}}
@@ -205,18 +209,6 @@ var primary = memo $ eta syntax (
                 assertVoid (a, Skip, loc)
             }
           }
-        -- Read
-        | loc=pos kRead x=par[lident] { -- Read (x)
-          fun (a) {
-            assertVoid (a, Ignore (Read (x)), loc)
-          }
-        }
-        -- Write
-        | loc=pos kWrite v=par[exp] { -- Write (v)
-          fun (a) {
-            assertVoid (a, Write (v (Val)), loc)
-          }
-        }
         -- If
         | loc=pos kIf body=ifBody {
             fun (a) {
@@ -258,7 +250,7 @@ var primary = memo $ eta syntax (
                                   [Left, {"*", "/", "%"}]
                                  }),
                                  postfix)),
-      postfix    = memo $ eta syntax (loc=pos e=primary ps=(i=inbr[s("["), exp, s("]")] {Index (i (Val))})* {fun (a) {foldl (fun (e, p) {                                                                                                                                                    case p of
+      postfix    = memo $ eta syntax (loc=pos e=primary ps=(i=brak[exp] {Index (i (Val))})* {fun (a) {foldl (fun (e, p) {                                                                                                                                                    case p of
                                                                                    Index (i) ->
                                                                                      fun (a) {
                                                                                        case a of
@@ -283,7 +275,7 @@ var primary = memo $ eta syntax (
       definition = memo $ eta syntax (kVar ds=list[syntax (lident (s["="] e=basic {e (Val)})?)] s[";"] {Var (ds)} |
                                       kVal ds=list[syntax (lident (s["="] e=basic {e (Val)}))]  s[";"] {Val (ds)} |
                                       kFun name=lident
-                                           args=inbr[s("("), list0 (lident), s(")")]
+                                           args=par[list0 (lident)]
                                            body=inbr[s("{"), scopeExpr, s("}")] {
                                            Fun (name, args, body (Weak))
                                       }
