@@ -10,7 +10,7 @@ jobs:
     steps:
       - name: Check Deadline
         run: |
-          deadline=2022-12-23T23:59
+          deadline=2022-12-31T23:59
           if [[ $(date +'%Y-%m-%d') > $deadline ]];
           then
               echo "FIASCO: The deadline has expired"
