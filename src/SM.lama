@@ -145,10 +145,11 @@ fun eval (env, w, insns) {
                 v:x:t -> assign(state, x, v); eval ([v : t, calls, state, world], p)
                esac
       | STA -> case stack of
-                v:i:x:t -> getData(x)[i] := v; eval ([v : t, calls, state, world], p)
+                 v:R(x):t -> assign(state, x, v); eval ([v : t, calls, state, world], p)
+               | v:i:x:t -> getData(x)[i] := v; eval ([v : t, calls, state, world], p)
                esac
       | LD (x)  -> eval ([lookup(state, x) : stack, calls, state, world], p)
-      | LDA (x) -> eval ([x : stack, calls, state, world], p)
+      | LDA (x) -> eval ([R (x) : stack, calls, state, world], p)
       | CONST (n) -> eval ([n : stack, calls, state, world], p)
       | BINOP (s) -> case stack of
                        y:(x:t) -> eval ([evalOp(s, x, y) : t, calls, state, world], p)
@@ -512,17 +513,9 @@ public fun compileSM (stmt) {
     | Ref    (x)     -> [false, env, singletonBuffer (LDA (lookupVar(env, x) ))]
     | Const  (n)     -> [false, env, singletonBuffer (CONST (n))]
     | String (s)     -> [false, env, singletonBuffer (STRING (s))]
-    | Assn  (Ref (x), e) ->
-      case compileExpr(env, e) of
-        [env, code] -> [false, env, code <+ ST (lookupVar(env, x) )]
-      esac
-    | Assn (x@ElemRef (_, _), e) ->
-      case compileExprs (env, {x, e}) of
-        [env, code] -> [false, env, code <+ STA]
-      esac
     | Assn (x, e) ->
       case compileExprs (env, {x, e}) of
-        [env, code] -> [false, env, code <+ STI]
+        [env, code] -> [false, env, code <+ STA]
       esac
     | If (cond, thenStmt, elseStmt) ->
       case genLabel(env) of

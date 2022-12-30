@@ -1,5 +1,6 @@
 -- X86 codegeneration interface
 -- We use stack machine programs as intermediate representation
+
 import Fun;
 import SM;
 import Collection;
@@ -448,10 +449,10 @@ fun move (from, to) {
   fi
 }
 
-fun lea (from, to) {
+fun lea (from, to, pad) {
   if memOpnd (from) && memOpnd (to)
-  then singletonBuffer (Lea (from, eax)) <+ Lea (eax, to)
-  else singletonBuffer (Lea (from, to))
+  then singletonBuffer (Lea (from, eax)) <+ Mov (eax, to) <+ Mov (eax, pad)
+  else singletonBuffer (Lea (from, to)) <+ Mov (to, pad)
   fi
 }
 
@@ -460,10 +461,18 @@ fun makeBox (n) {
   n * 2 + 1
 }
 
+fun lvalue(n) {
+  L (makeBox (n))
+}
+
 -- Generates a fixednum representation
 -- conversion
 fun toFixedNum (r) {
   singletonBuffer (Sal1 (r)) <+ Or1 (r)
+}
+
+fun fromFixedNum(r) {
+  singletonBuffer (Sar1(r))
 }
 
 -- Gets a suffix for Set instruction from
@@ -513,7 +522,7 @@ fun compile (env, code) {
         -- 2. generate epilogue for END instruction.
         | CONST (n) ->
             case allocate(env) of
-              [s, env] -> [env, code <+ Mov (L (n), s)]
+              [s, env] -> [env, code <+ Mov (lvalue(n), s)]
             esac
         | ELEM -> compileCall(env, code, "Belem", 2, {})
         | STRING (s) ->
@@ -523,12 +532,12 @@ fun compile (env, code) {
                   [s, env] -> compileCall(env, code <+> move(M ("$" ++ sname), s), "Bstring", 1, {})
                 esac
             esac
-        | ARRAY (n) -> compileCall(env, code, "Barray", n, {L(n)})
+        | ARRAY (n) -> compileCall(env, code, "Barray", n, {lvalue(n)})
         | SEXP (name, n) ->
             case allocate(env) of
-              [hash, env] -> compileCall(env, code <+> move (L (tagHash(name)), hash), "Bsexp", n + 1, {L(n + 1)})
+              [hash, env] -> compileCall(env, code <+> move (lvalue(tagHash(name)), hash), "Bsexp", n + 1, {lvalue(n + 1)})
             esac
-        | ST (x) ->
+          | ST (x) ->
             case peek(env) of
               s -> [env, code <+> move (s, loc(env, x))]
             esac
@@ -546,14 +555,16 @@ fun compile (env, code) {
             esac
         | LDA (x) ->
             case allocate(env) of
-              [s, env] -> [env, code <+> lea (loc(env, x), s)]
+              [s, env] -> case allocate(env) of
+                [pad, env] -> [env, code <+> lea (loc(env, x), s, pad)]
+              esac
             esac
         | BINOP (op) -> compileBinop(env, code, op)
         | JMP (l) -> [setBarrier(setStack(env, l)), code <+ Jmp (l)]
         | LABEL (s) -> [solveBarrier(env, s), code <+ Label (s)]
         | CJMP (c, l) ->
               case pop(env) of
-                [s, env] -> [setStack(env, l), code <+> toBool(s) <+ CJmp(c, l)]
+                [s, env] -> [setStack(env, l), code <+> fromFixedNum(s) <+> toBool(s) <+ CJmp(c, l)]
               esac
         | DUP ->
             case peek(env) of
@@ -653,11 +664,7 @@ fun compileBinop(env, code, op) {
       "/" -> eax
     | "%" -> edx
     esac;
-    if stackOpnd (a) then
-      move(b, eax) <+> move(a, edx) <+ Cltd <+ IDiv (edx) <+> move(reg, res)
-    else
-      move(b, eax) <+ Cltd <+ IDiv (a) <+> move(reg, res)
-    fi
+    move(b, eax) <+ Cltd <+ IDiv (a) <+> move(reg, res)
   }
 
   fun logic(a, b, op, res) {
@@ -686,7 +693,7 @@ fun compileBinop(env, code, op) {
   case env.pop2 of
     [a, b, env] -> case env.allocate of
       [res, env] ->
-        [env, code <+> select(op) (a, b, op, res)]
+        [env, code <+> fromFixedNum(a) <+> fromFixedNum(b) <+> select(op) (a, b, op, res) <+> toFixedNum(res)]
     esac
   esac
 }
