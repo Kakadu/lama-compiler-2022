@@ -136,10 +136,6 @@ fun eval(env, w, insns) {
           esac
         | LD (x)     -> [lookup(s, x):st, cst, s, w]
         | LDA (x)    -> [Ref(x):st, cst, s, w]
-        | STI        ->
-          case st of
-            n : Ref(x) : stack -> [n:stack, s <- [x, n], w]
-          esac
         | LABEL (l)  -> [st, cst, s, w]
         | DROP       ->
           case st of
