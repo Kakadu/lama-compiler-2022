@@ -1,2 +1,4 @@
 *.i
 *.s
+/src/lama-impl
+
