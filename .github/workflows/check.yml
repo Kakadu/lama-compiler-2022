@@ -2,7 +2,7 @@ name: Regression
 
 on: # [push]
   pull_request:
-    # pull_request_target:
+  # pull_request_target:
     types: [synchronize, opened, reopened, edited]
 
 jobs:
@@ -18,10 +18,10 @@ jobs:
               echo "FIASCO: The deadline has expired"
               exit 1
           fi
-      - name: Extract branch name
-      shell: bash
-      run: echo "##[set-output name=branch;]$(echo ${GITHUB_REF#refs/heads/})"
-      id: extract_branch
+       - name: Extract branch name
+        shell: bash
+        run: echo "##[set-output name=branch;]$(echo ${GITHUB_REF#refs/heads/})"
+        id: extract_branch
       - uses: actions/checkout@v2
         with:
           ref: refs/pull/${{ github.event.pull_request.number }}/head
@@ -49,10 +49,10 @@ jobs:
           else
             echo ${branch:1:2} > assignment_number.txt
           fi
-      - uses: actions/upload-artifact@v2
-          with:
-            name: share_info
-            path: |
-              gitid.txt
-              base.txt
-              assignment_number.txt
+     - uses: actions/upload-artifact@v2
+        with:
+          name: share_info
+          path: |
+            gitid.txt
+            base.txt
+            assignment_number.txt
