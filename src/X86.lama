@@ -272,6 +272,28 @@ fun suffix (op) {
   esac
 }
 
+fun binopPlusMinusMul(op, x, y, env, code) {
+  if stackOpnd(x) && stackOpnd(y)
+    then [env.push(y), code <+ Mov(y, edx) <+ Binop(op, x, edx) <+ Mov(edx, y)]
+    else [env.push(y), code <+ Binop(op, x, y)]
+  fi
+}
+
+fun binopDiv(x, y, env, code) {
+  [env.push(x), code <+ Mov(y, eax) <+ Cltd <+ IDiv(x) <+ Mov(eax, x)]
+}
+
+fun binopPercent(x, y, env, code) {
+  [env.push(x), code <+ Mov(y, eax) <+ Cltd <+ IDiv(x) <+ Mov(edx, x)]
+}
+
+fun binopCmp(op, x, y, env, code) {
+  if stackOpnd(x) && stackOpnd(y)
+    then [env.push(y), code <+ Mov(y, edx) <+ Binop("cmp", x, edx) <+ Set(suffix(op), "%al") <+ Mov(eax, y)]
+    else [env.push(y), code <+ Binop("cmp", x, y) <+ Set(suffix(op), "%al") <+ Mov(eax, y)]
+  fi
+}
+
 -- Compiles stack machine code into a list of x86 instructions. Takes an environment
 -- and stack machine code, returns an updated environment and x86 code.
 fun compile (env, code) {
@@ -286,6 +308,46 @@ fun compile (env, code) {
       | WRITE ->
           case env.pop of
             [s, env] -> [env, code <+ Push (s) <+ Call ("Lwrite") <+ Pop (eax)]
+          esac
+      | CONST (n) ->
+          case env.allocate of
+            [s, env] -> [env, code <+ Mov(L(n), s)]
+          esac
+      | ST (x) ->
+          case env.addGlobal(x).pop of
+            [s, env] -> [env, code <+> move(s, env.loc(x))]
+          esac
+      | LD (x) ->
+          case env.addGlobal(x).allocate of
+            [s, env] -> [env, code <+> move(env.loc(x), s)]
+          esac
+      | BINOP (op) ->
+          case env.pop2 of
+            [x, y, env] ->
+              case op of
+                  "+" ->
+                    binopPlusMinusMul(op, x, y, env, code)
+                | "-" ->
+                    binopPlusMinusMul(op, x, y, env, code)
+                | "*" ->
+                    binopPlusMinusMul(op, x, y, env, code)
+                | "/" ->
+                    binopDiv(x, y, env, code)
+                | "%" ->
+                    binopPercent(x, y, env, code)
+                | "<" ->
+                    binopCmp(op, x, y, env, code)
+                | "<=" ->
+                    binopCmp(op, x, y, env, code)
+                | ">" ->
+                    binopCmp(op, x, y, env, code)
+                | ">=" ->
+                    binopCmp(op, x, y, env, code)
+                | "==" ->
+                    binopCmp(op, x, y, env, code)
+                | "!=" ->
+                    binopCmp(op, x, y, env, code)
+              esac
           esac
       | _ -> failure ("codegeneration for instruction %s is not yet implemented\n", i.string)
       esac
