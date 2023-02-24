@@ -1,2 +1,7 @@
+# Clion
+.idea/
+
 *.i
 *.s
+/src/lama-impl
+
