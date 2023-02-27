@@ -1,3 +1,10 @@
+.idea/
+
 *.i
 *.s
 /src/lama-impl
+/regression
+
+/src/Driver.lama
+/src/Manifest.lama
+/src/Lexer.lama
